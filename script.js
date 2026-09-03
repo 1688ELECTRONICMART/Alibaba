@@ -17,18 +17,18 @@ const provider = new firebase.auth.GoogleAuthProvider();
 
 let currentUser = null;
 let mockProducts = [
-    { id: 'p1', name: 'Premium Components', price: 99.00, company: 'Mart Factory', condition: 'New', category: 'Components', image: 'fa-microchip' }
+    { id: 'p1', name: 'Premium Components', price: 99.00, company: 'Mart Factory', condition: 'New', category: 'Electronics', image: 'fa-microchip' }
 ];
 let featuredAds = [
     { id: 'ad1', title: 'Quality Electronics', short: 'Sourced from top manufacturers', icon: 'fa-microchip' },
     { id: 'ad2', title: 'Fast Global Shipping', short: 'Door to door delivery', icon: 'fa-truck' }
 ];
 let mockCategories = [
-    { id: 'c1', name: 'Phones', icon: 'fa-mobile-alt' },
-    { id: 'c2', name: 'Laptops', icon: 'fa-laptop' },
-    { id: 'c3', name: 'Car Acc', icon: 'fa-car' },
-    { id: 'c4', name: 'Tools', icon: 'fa-screwdriver' },
-    { id: 'c5', name: 'Components', icon: 'fa-microchip' }
+    { id: 'c1', name: 'Phone', icon: 'fa-mobile-alt' },
+    { id: 'c2', name: 'Electronics', icon: 'fa-bolt' },
+    { id: 'c3', name: 'Instrument', icon: 'fa-microchip' },
+    { id: 'c4', name: 'Vehicle', icon: 'fa-car' },
+    { id: 'c5', name: 'Laptops', icon: 'fa-laptop' }
 ];
 let userChats = [];
 
@@ -704,7 +704,7 @@ const pages = {
                         <h2>Welcome to 1688</h2>
                         <p style="color: var(--light-text); margin-bottom: 30px;">Sign in to manage your orders, favorites, and chat with suppliers.</p>
                         <button class="google-signin-btn" onclick="signInWithGoogle()">
-                            <i class="fab fa-google google-icon"></i>
+                            <img src="https://upload.wikimedia.org/wikipedia/commons/c/c1/Google_\"G\"_logo.svg" alt="Google logo" class="google-icon-img">
                             <span>Continue with Google</span>
                         </button>
                     </div>
@@ -1089,10 +1089,24 @@ function updateActiveNav(pageId) {
     });
 }
 
-function navigate(pageId, itemId = null, category = null, sortBy = 'default') {
+function navigate(pageId, itemId = null, category = null, sortBy = 'default', updateUrl = true) {
     const content = document.getElementById('app-content');
     const mainHeader = document.querySelector('.header');
     const bottomNav = document.querySelector('.bottom-nav');
+
+    // Update URL Hash for Persistence
+    if (updateUrl) {
+        let hash = `#/${pageId}`;
+        if (itemId) hash += `/${itemId}`;
+        const params = new URLSearchParams();
+        if (category) params.set('cat', category);
+        if (sortBy !== 'default') params.set('sort', sortBy);
+        const paramStr = params.toString();
+        if (paramStr) hash += `?${paramStr}`;
+
+        // Prevent recursive trigger from hashchange listener
+        window.history.pushState(null, null, hash);
+    }
 
     // Reset potential state from previous navigation
     document.body.classList.remove('chat-mode');
@@ -1462,4 +1476,23 @@ setInterval(() => {
     slides[nextIdx].classList.add('active');
 }, 5000);
 
-navigate('home');
+// Routing Engine for Page Persistence
+function handleRouting() {
+    const hash = window.location.hash || '#/home';
+    const [pathPart, queryPart] = hash.replace('#/', '').split('?');
+    const segments = pathPart.split('/');
+
+    const pageId = segments[0] || 'home';
+    const itemId = segments[1] || null;
+
+    const params = new URLSearchParams(queryPart || '');
+    const category = params.get('cat');
+    const sortBy = params.get('sort') || 'default';
+
+    // Navigate without updating the URL again
+    navigate(pageId, itemId, category, sortBy, false);
+}
+
+window.addEventListener('popstate', handleRouting);
+
+handleRouting();
