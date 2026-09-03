@@ -16,9 +16,20 @@ const auth = firebase.auth();
 const provider = new firebase.auth.GoogleAuthProvider();
 
 let currentUser = null;
-let mockProducts = [];
-let featuredAds = [];
-let mockCategories = [];
+let mockProducts = [
+    { id: 'p1', name: 'Premium Components', price: 99.00, company: 'Mart Factory', condition: 'New', category: 'Components', image: 'fa-microchip' }
+];
+let featuredAds = [
+    { id: 'ad1', title: 'Quality Electronics', short: 'Sourced from top manufacturers', icon: 'fa-microchip' },
+    { id: 'ad2', title: 'Fast Global Shipping', short: 'Door to door delivery', icon: 'fa-truck' }
+];
+let mockCategories = [
+    { id: 'c1', name: 'Phones', icon: 'fa-mobile-alt' },
+    { id: 'c2', name: 'Laptops', icon: 'fa-laptop' },
+    { id: 'c3', name: 'Car Acc', icon: 'fa-car' },
+    { id: 'c4', name: 'Tools', icon: 'fa-screwdriver' },
+    { id: 'c5', name: 'Components', icon: 'fa-microchip' }
+];
 let userChats = [];
 
 auth.onAuthStateChanged((user) => {
@@ -60,12 +71,14 @@ function signInWithGoogle() {
 // Real-time Listeners
 db.collection("products").onSnapshot((snapshot) => {
     mockProducts = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-    if (document.getElementById('app-content').querySelector('.home-page')) navigate('home');
+    renderHomePageIfActive();
 });
 
 db.collection("categories").onSnapshot((snapshot) => {
-    mockCategories = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-    if (document.getElementById('app-content').querySelector('.home-page')) navigate('home');
+    if (!snapshot.empty) {
+        mockCategories = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        renderHomePageIfActive();
+    }
 });
 
 db.collection("notifications").orderBy("timestamp", "desc").limit(1).onSnapshot((snapshot) => {
@@ -84,9 +97,16 @@ db.collection("notifications").orderBy("timestamp", "desc").limit(1).onSnapshot(
 
 rtdb.ref("adverts").on("value", (snapshot) => {
     const data = snapshot.val();
-    featuredAds = data ? Object.values(data) : [];
-    if (document.getElementById('app-content').querySelector('.home-page')) navigate('home');
+    if (data) {
+        featuredAds = Object.values(data);
+        renderHomePageIfActive();
+    }
 });
+
+function renderHomePageIfActive() {
+    const content = document.getElementById('app-content');
+    if (content.querySelector('.home-page')) navigate('home');
+}
 
 // Hot Update Engine Listener
 rtdb.ref("system/deployment").on("value", (snapshot) => {
@@ -534,9 +554,10 @@ const pages = {
 
             <div class="home-section" id="recommended-section" style="padding-top: 0;">
                 ${filteredProducts.length === 0 ? `
-                    <div class="empty-state" style="padding: 100px 20px;">
-                        <i class="fas fa-box-open"></i>
-                        <p>${searchQuery ? `No results for "${searchQuery}"` : 'No items available.'}</p>
+                    <div class="empty-state" style="padding: 60px 20px; text-align: center; color: #ccc;">
+                        <i class="fas fa-box-open fa-4x" style="margin-bottom: 20px; opacity: 0.5;"></i>
+                        <p style="font-weight: 600; color: #999;">${searchQuery ? `No matching products for "${searchQuery}"` : 'Your electronic mart is ready.'}</p>
+                        <p style="font-size: 12px; margin-top: 8px;">Add items in the admin app to see them here.</p>
                     </div>
                 ` : `
                     <div class="product-grid">
