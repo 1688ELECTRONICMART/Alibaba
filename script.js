@@ -1,0 +1,1444 @@
+// Firebase Configuration
+const firebaseConfig = {
+    apiKey: "AIzaSyDvzRnxMv6FMZdx0obAZUAIUyTQtu1A-90",
+    authDomain: "electronic-mart-1688.firebaseapp.com",
+    projectId: "electronic-mart-1688",
+    storageBucket: "electronic-mart-1688.firebasestorage.app",
+    messagingSenderId: "988016654865",
+    appId: "1:988016654865:web:e3afa29c54cc8a2b6f0fb0"
+};
+
+// Initialize Firebase
+firebase.initializeApp(firebaseConfig);
+const db = firebase.firestore();
+const rtdb = firebase.database();
+const auth = firebase.auth();
+const provider = new firebase.auth.GoogleAuthProvider();
+
+let currentUser = null;
+let mockProducts = [];
+let featuredAds = [];
+let mockCategories = [];
+let userChats = [];
+
+auth.onAuthStateChanged((user) => {
+    currentUser = user;
+    if (user) {
+        // Sync user data to Firestore
+        db.collection("users").document(user.uid).set({
+            id: user.uid,
+            name: user.displayName,
+            email: user.email,
+            photo: user.photoURL,
+            lastLogin: firebase.firestore.FieldValue.serverTimestamp()
+        }, { merge: true });
+
+        // Listen for user's specific chats
+        rtdb.ref("chats").on("value", (snapshot) => {
+            const data = snapshot.val();
+            if (data) {
+                userChats = Object.values(data).filter(chat => chat.userName === user.displayName || chat.id.includes(user.uid));
+                const content = document.getElementById('app-content');
+                if (content.querySelector('.message-page')) navigate('message');
+            }
+        });
+    }
+
+    const content = document.getElementById('app-content');
+    if (content.querySelector('.profile-page')) {
+        navigate('profile');
+    }
+});
+
+function signInWithGoogle() {
+    auth.signInWithPopup(provider).catch(error => {
+        console.error("Auth Error:", error);
+        alert("Failed to sign in with Google.");
+    });
+}
+
+// Real-time Listeners
+db.collection("products").onSnapshot((snapshot) => {
+    mockProducts = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    if (document.getElementById('app-content').querySelector('.home-page')) navigate('home');
+});
+
+db.collection("categories").onSnapshot((snapshot) => {
+    mockCategories = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    if (document.getElementById('app-content').querySelector('.home-page')) navigate('home');
+});
+
+db.collection("notifications").orderBy("timestamp", "desc").limit(1).onSnapshot((snapshot) => {
+    snapshot.docChanges().forEach((change) => {
+        if (change.type === "added") {
+            const data = change.doc.data();
+            // Avoid showing old notifications on first load
+            const now = new Date().getTime();
+            const notifTime = new Date(data.timestamp).getTime();
+            if (now - notifTime < 10000) { // Only if added in the last 10 seconds
+                showNotificationToast(data.title, data.body);
+            }
+        }
+    });
+});
+
+rtdb.ref("adverts").on("value", (snapshot) => {
+    const data = snapshot.val();
+    featuredAds = data ? Object.values(data) : [];
+    if (document.getElementById('app-content').querySelector('.home-page')) navigate('home');
+});
+
+// Hot Update Engine Listener
+rtdb.ref("system/deployment").on("value", (snapshot) => {
+    const data = snapshot.val();
+    if (!data) return;
+
+    // Check if this is a new update (ignoring the first load)
+    const now = new Date().getTime();
+    if (now - data.last_updated_at < 30000) { // Only if updated in the last 30 seconds
+        console.log("Hot update signal received:", data);
+        applyHotPatch(data);
+    }
+});
+
+function applyHotPatch(data) {
+    showNotificationToast("System Update", "Applying live improvements...");
+
+    // Show Progress Bar
+    const progress = document.createElement('div');
+    progress.className = 'update-progress';
+    document.body.appendChild(progress);
+    setTimeout(() => progress.style.width = '100%', 50);
+
+    if (data.force_reload) {
+        setTimeout(() => location.reload(), 2000);
+        return;
+    }
+
+    // 1. Hot Swap CSS
+    const links = document.getElementsByTagName('link');
+    for (let link of links) {
+        if (link.rel === 'stylesheet' && link.href.includes('style.css')) {
+            link.href = 'style.css?v=' + data.last_updated_at;
+            break;
+        }
+    }
+
+    // 2. Refresh Background Cache via Service Worker
+    if (navigator.serviceWorker.controller) {
+        navigator.serviceWorker.controller.postMessage({
+            type: 'HOT_PATCH',
+            version: data.last_updated_at
+        });
+    }
+
+    // 3. Re-render Current View
+    const currentPath = document.querySelector('.nav-item.active')?.dataset.page || 'home';
+    setTimeout(() => {
+        navigate(currentPath);
+        setTimeout(() => progress.remove(), 500);
+    }, 1500);
+}
+
+const mockOrders = [];
+
+const mockMessages = [];
+
+const followedShops = [];
+
+// Persistent State Helper
+const storage = {
+    get: (key, fallback) => {
+        try { return JSON.parse(localStorage.getItem(key)) || fallback; }
+        catch { return fallback; }
+    },
+    set: (key, value) => {
+        try { localStorage.setItem(key, JSON.stringify(value)); } catch {}
+    }
+};
+
+let cart = storage.get('cart', []);
+let selectedCartItems = new Set(storage.get('selectedCartItems', []));
+let favorites = storage.get('favorites', []);
+let footprints = storage.get('footprints', []);
+let recentSearches = storage.get('recentSearches', []);
+let addresses = storage.get('addresses', []);
+let profileImage = storage.get('profileImage', null);
+
+function saveData() {
+    storage.set('cart', cart);
+    storage.set('selectedCartItems', Array.from(selectedCartItems));
+    storage.set('favorites', favorites);
+    storage.set('footprints', footprints);
+    storage.set('recentSearches', recentSearches);
+    storage.set('addresses', addresses);
+}
+
+function showNotificationToast(title, body) {
+    let container = document.querySelector('.toast-container');
+    if (!container) {
+        container = document.createElement('div');
+        container.className = 'toast-container';
+        document.body.appendChild(container);
+    }
+
+    const toast = document.createElement('div');
+    toast.className = 'toast';
+    toast.innerHTML = `
+        <div class="toast-icon"><i class="fas fa-bullhorn"></i></div>
+        <div class="toast-content">
+            <h4>${title}</h4>
+            <p>${body}</p>
+        </div>
+    `;
+
+    container.appendChild(toast);
+
+    setTimeout(() => {
+        toast.style.opacity = '0';
+        toast.style.transform = 'translateY(-20px)';
+        toast.style.transition = 'opacity 0.3s, transform 0.3s';
+        setTimeout(() => toast.remove(), 300);
+    }, 5000);
+}
+let addressFormState = { mode: 'new', id: null };
+
+function getAddressDefaults() {
+    const current = addressFormState.id ? addresses.find(item => item.id === addressFormState.id) : null;
+
+    return current || {
+        label: 'Home',
+        name: '',
+        phone: '',
+        city: '',
+        district: '',
+        address: '',
+        postcode: ''
+    };
+}
+
+function renderAddressForm() {
+    const current = getAddressDefaults();
+    const isEdit = addressFormState.mode === 'edit' && addressFormState.id;
+
+    return `
+        <form class="address-form" id="address-form">
+            <div class="address-form-title">${isEdit ? 'Edit shipping address' : 'Add shipping address'}</div>
+
+            <div class="form-grid">
+                <label class="field-group">
+                    <span>Address label</span>
+                    <input type="text" name="label" value="${current.label || ''}" placeholder="Home / Office" required>
+                </label>
+                <label class="field-group">
+                    <span>Contact name</span>
+                    <input type="text" name="name" value="${current.name || ''}" placeholder="Full name" required>
+                </label>
+                <label class="field-group">
+                    <span>Phone number</span>
+                    <input type="tel" name="phone" value="${current.phone || ''}" placeholder="+86 138 ..." required>
+                </label>
+                <label class="field-group">
+                    <span>City</span>
+                    <input type="text" name="city" value="${current.city || ''}" placeholder="Shenzhen" required>
+                </label>
+                <label class="field-group">
+                    <span>District</span>
+                    <input type="text" name="district" value="${current.district || ''}" placeholder="Nanshan District" required>
+                </label>
+                <label class="field-group">
+                    <span>Postal code</span>
+                    <input type="text" name="postcode" value="${current.postcode || ''}" placeholder="518000" required>
+                </label>
+            </div>
+
+            <label class="field-group field-full">
+                <span>Street address</span>
+                <textarea name="address" rows="3" placeholder="Street, building, unit, landmark" required>${current.address || ''}</textarea>
+            </label>
+
+            <div class="address-form-actions">
+                <button class="primary-btn" type="submit">${isEdit ? 'Save changes' : 'Add address'}</button>
+                <button class="secondary-btn cancel-address-btn" type="button">Cancel</button>
+            </div>
+        </form>
+    `;
+}
+
+function addToCart(itemId, type) {
+    let item;
+    if (type === 'ad') {
+        item = featuredAds.find(ad => ad.id === itemId);
+    } else {
+        item = mockProducts.find(p => p.id === parseInt(itemId));
+    }
+
+    if (item && !cart.some(c => c.id === item.id)) {
+        cart.push({ ...item, type });
+        selectedCartItems.add(String(item.id));
+        saveData();
+        updateCartBadge();
+        alert(`${item.title || item.name} added to cart!`);
+    } else if (item) {
+        alert('Item is already in your cart.');
+    }
+}
+
+function toggleCartItem(itemId) {
+    const id = String(itemId);
+    if (selectedCartItems.has(id)) {
+        selectedCartItems.delete(id);
+    } else {
+        selectedCartItems.add(id);
+    }
+    saveData();
+    const content = document.getElementById('app-content');
+    if (content.querySelector('.cart-page')) {
+        content.innerHTML = pages.cart();
+    }
+}
+
+function sendRealMessage(chatId) {
+    const input = document.getElementById('chat-input');
+    const text = input.value.trim();
+    if (!text || !currentUser) return;
+
+    const chatRef = rtdb.ref(`chats/${chatId}`);
+    chatRef.once('value').then(snapshot => {
+        const chatData = snapshot.val();
+        const newMessage = {
+            sender: currentUser.displayName || 'Customer',
+            text: text,
+            time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            fromMe: true
+        };
+
+        const updatedMessages = [...(chatData.messages || []), newMessage];
+        chatRef.update({
+            messages: updatedMessages,
+            lastMessage: text,
+            lastTime: 'Just now',
+            adminUnreadCount: (chatData.adminUnreadCount || 0) + 1
+        });
+
+        input.value = '';
+    });
+}
+
+function startChatWithSupplier(productName) {
+    if (!currentUser) return navigate('profile');
+
+    const chatId = `chat_${currentUser.uid}`;
+    const chatRef = rtdb.ref(`chats/${chatId}`);
+
+    chatRef.once('value').then(snapshot => {
+        if (!snapshot.exists()) {
+            chatRef.set({
+                id: chatId,
+                userName: currentUser.displayName,
+                userAvatar: 'fa-user',
+                lastMessage: `Inquiry about ${productName}`,
+                lastTime: 'Just now',
+                messages: [{
+                    sender: currentUser.displayName,
+                    text: `Hello, I'm interested in ${productName}.`,
+                    time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                    fromMe: true
+                }],
+                adminUnreadCount: 1,
+                userUnreadCount: 0
+            });
+        }
+        navigate('chat', chatId);
+    });
+}
+
+function toggleFavorite(itemId, type) {
+    const id = type === 'prod' ? parseInt(itemId) : itemId;
+    const isFav = favorites.some(f => f.id === id);
+
+    if (isFav) {
+        favorites = favorites.filter(f => f.id !== id);
+    } else {
+        const item = type === 'ad' ? featuredAds.find(ad => ad.id === id) : mockProducts.find(p => p.id === id);
+        if (item) favorites.push({ ...item, type });
+    }
+    saveData();
+
+    const content = document.getElementById('app-content');
+    if (content.querySelector('.favorites-page')) {
+        content.innerHTML = pages.favorites();
+    }
+}
+
+function trackFootprint(itemId, type) {
+    const id = type === 'prod' ? parseInt(itemId) : itemId;
+    const item = type === 'ad' ? featuredAds.find(ad => ad.id === id) : mockProducts.find(p => p.id === id);
+
+    if (item) {
+        footprints = footprints.filter(f => f.id !== id);
+        footprints.unshift({ ...item, type });
+        if (footprints.length > 30) footprints.pop();
+        saveData();
+    }
+}
+
+function updateCartBadge() {
+    const badge = document.querySelector('.cart-badge');
+    if (!badge) return;
+
+    const count = cart.length;
+    if (count > 0) {
+        badge.textContent = count > 99 ? '99+' : count;
+        badge.style.display = 'flex';
+    } else {
+        badge.style.display = 'none';
+    }
+}
+
+function removeFromCart(itemId) {
+    const normalizedId = String(itemId);
+    cart = cart.filter(item => String(item.id) !== normalizedId);
+    selectedCartItems.delete(normalizedId);
+    saveData();
+    updateCartBadge();
+    navigate('cart');
+}
+
+function checkout() {
+    const selectedList = cart.filter(item => selectedCartItems.has(String(item.id)));
+    if (selectedList.length === 0) return;
+
+    const content = document.getElementById('app-content');
+    content.style.opacity = '0.5';
+    content.style.pointerEvents = 'none';
+
+    setTimeout(() => {
+        // Selective remove
+        const selectedIds = new Set(selectedList.map(item => String(item.id)));
+        cart = cart.filter(item => !selectedIds.has(String(item.id)));
+        selectedCartItems = new Set();
+
+        saveData();
+        updateCartBadge();
+
+        content.style.opacity = '1';
+        content.style.pointerEvents = 'auto';
+        navigate('checkout-success', selectedList);
+    }, 1500);
+}
+
+function logout() {
+    if (confirm('Are you sure you want to log out? This will reset all your sourcing data.')) {
+        auth.signOut().then(() => {
+            localStorage.clear();
+            location.reload(); // Hard reset
+        });
+    }
+}
+
+function deleteAccount() {
+    if (confirm('WARNING: This will permanently delete your account and all saved data. This action cannot be undone.')) {
+        if (confirm('Final confirmation: Delete account now?')) {
+            localStorage.clear();
+            alert('Your account has been permanently deleted.');
+            location.reload();
+        }
+    }
+}
+
+function saveAddress(formData) {
+    const formValues = {
+        label: formData.get('label')?.toString().trim(),
+        name: formData.get('name')?.toString().trim(),
+        phone: formData.get('phone')?.toString().trim(),
+        city: formData.get('city')?.toString().trim(),
+        district: formData.get('district')?.toString().trim(),
+        postcode: formData.get('postcode')?.toString().trim(),
+        address: formData.get('address')?.toString().trim()
+    };
+
+    // Advanced Validation
+    if (formValues.name.length < 2) return alert('Contact name is too short.');
+    if (!/^\+?[\d\s-]{8,}$/.test(formValues.phone)) return alert('Please enter a valid phone number.');
+    if (!/^\d{5,6}$/.test(formValues.postcode)) return alert('Postal code must be 5 or 6 digits.');
+    if (formValues.address.length < 5) return alert('Please provide a more detailed street address.');
+
+    if (addressFormState.mode === 'edit' && addressFormState.id) {
+        addresses = addresses.map(item => item.id === addressFormState.id ? { ...item, ...formValues } : item);
+    } else {
+        addresses = [{
+            id: Date.now(),
+            ...formValues
+        }, ...addresses];
+    }
+
+    saveData();
+    addressFormState = { mode: 'new', id: null };
+    navigate('profile');
+}
+
+const pages = {
+    home: (searchQuery = '', filterCategory = null, sortBy = 'default') => {
+        const query = searchQuery.toLowerCase().trim();
+        let filteredProducts = mockProducts.filter(p => {
+            const matchesQuery = p.name.toLowerCase().includes(query) || p.company.toLowerCase().includes(query);
+            const matchesCategory = filterCategory ? p.category === filterCategory : true;
+            return matchesQuery && matchesCategory;
+        });
+
+        if (sortBy === 'low') filteredProducts.sort((a, b) => a.price - b.price);
+        else if (sortBy === 'high') filteredProducts.sort((a, b) => b.price - a.price);
+
+        return `
+        <section class="home-page page-enter">
+            <div id="search-history-container" class="search-history-dropdown" style="display: none;">
+                <div class="history-header">
+                    <span>Recent Searches</span>
+                    <button class="clear-history-btn">Clear</button>
+                </div>
+                <div class="history-tags">
+                    ${recentSearches.map(s => `<button class="history-tag" onclick="document.getElementById('search-input').value='${s}'; navigate('home', '${s}')">${s}</button>`).join('')}
+                </div>
+            </div>
+
+            <div class="promo-carousel">
+                ${featuredAds.map((ad, i) => `
+                    <div class="carousel-slide ${i === 0 ? 'active' : ''}">
+                        <div class="carousel-content">
+                            <h2>${ad.title}</h2>
+                            <p>${ad.short}</p>
+                        </div>
+                        <i class="fas ${ad.icon} fa-3x" style="margin-left: auto; opacity: 0.3;"></i>
+                    </div>
+                `).join('')}
+            </div>
+
+            <div class="category-grid">
+                ${mockCategories.map(cat => `
+                    <div class="category-item" onclick="navigate('home', '', '${cat.name}')">
+                        <div class="category-icon"><i class="fas ${cat.icon}"></i></div>
+                        <span>${cat.name}</span>
+                    </div>
+                `).join('')}
+            </div>
+
+            <div class="home-filters">
+                <div class="section-title">${filterCategory ? filterCategory : 'Recommended'}</div>
+                <select class="sort-select" onchange="navigate('home', '', '${filterCategory || ''}', this.value)">
+                    <option value="default" ${sortBy === 'default' ? 'selected' : ''}>Default</option>
+                    <option value="low" ${sortBy === 'low' ? 'selected' : ''}>Price: Low to High</option>
+                    <option value="high" ${sortBy === 'high' ? 'selected' : ''}>Price: High to Low</option>
+                </select>
+            </div>
+
+            <div class="home-section" id="recommended-section" style="padding-top: 0;">
+                ${filteredProducts.length === 0 ? `
+                    <div class="empty-state" style="padding: 100px 20px;">
+                        <i class="fas fa-box-open"></i>
+                        <p>${searchQuery ? `No results for "${searchQuery}"` : 'No items available.'}</p>
+                    </div>
+                ` : `
+                    <div class="product-grid">
+                        ${filteredProducts.map((p, i) => `
+                            <button class="product-card stagger-item" type="button" data-product-id="${p.id}" data-item-type="prod" style="animation-delay: ${i * 0.1}s">
+                            <div class="fav-overlay ${favorites.some(f => f.id === p.id) ? 'active' : ''}" data-fav-id="${p.id}" data-fav-type="prod">
+                                <i class="fas fa-heart"></i>
+                            </div>
+                                <div class="product-img">
+                                    <i class="fas ${p.images && p.images.length > 0 ? 'fa-image' : (p.image || 'fa-image')} fa-3x"></i>
+                                </div>
+                                <div class="product-info">
+                                    <div class="condition-badge ${p.condition.toLowerCase().includes('new') ? 'new' : 'used'}">${p.condition}</div>
+                                    <div class="product-name">${p.name}</div>
+                                    <div class="product-price">¥${p.price.toFixed(2)}</div>
+                                    <div class="product-company">${p.company}</div>
+                                </div>
+                            </button>
+                        `).join('')}
+                    </div>
+                `}
+            </div>
+        </section>
+    `;
+    },
+    cart: () => {
+        if (cart.length === 0) {
+            return `
+                <div class="empty-state page-enter">
+                    <i class="fas fa-shopping-cart"></i>
+                    <p>Your cart is empty</p>
+                    <button class="go-shopping" type="button">Go Sourcing</button>
+                </div>
+            `;
+        }
+
+        const selectedList = cart.filter(item => selectedCartItems.has(String(item.id)));
+        const total = selectedList.reduce((sum, item) => sum + item.price, 0);
+
+        return `
+            <div class="cart-page page-enter">
+                <div class="section-title">My Cart (${cart.length})</div>
+                <div class="cart-list">
+                    ${cart.map(item => `
+                        <div class="cart-item">
+                            <input type="checkbox" class="cart-checkbox"
+                                ${selectedCartItems.has(String(item.id)) ? 'checked' : ''}
+                                onchange="toggleCartItem('${item.id}')">
+                            <div class="cart-item-img">
+                                <i class="fas ${item.images ? item.images[0] : item.image}"></i>
+                            </div>
+                            <div class="cart-item-info">
+                                <div class="cart-item-name">${item.title || item.name}</div>
+                                <div class="cart-item-price">¥${item.price.toFixed(2)}</div>
+                            </div>
+                            <button class="remove-btn" type="button" data-remove-id="${item.id}">
+                                <i class="fas fa-trash"></i>
+                            </button>
+                        </div>
+                    `).join('')}
+                </div>
+                <div class="cart-footer">
+                    <div class="cart-total">
+                        <span>Selected (${selectedList.length}):</span>
+                        <span>¥${total.toFixed(2)}</span>
+                    </div>
+                    <button class="checkout-btn ${selectedList.length === 0 ? 'disabled' : ''}"
+                        type="button" onclick="${selectedList.length > 0 ? 'checkout()' : ''}">Checkout</button>
+                </div>
+            </div>
+        `;
+    },
+    message: () => {
+        if (!currentUser) {
+            return `
+                <div class="message-page page-enter">
+                    <div class="empty-state" style="padding-top: 100px;">
+                        <i class="fas fa-comments"></i>
+                        <p>Sign in to view your messages</p>
+                        <button class="primary-btn" onclick="navigate('profile')" style="margin-top: 20px;">Go to Profile</button>
+                    </div>
+                </div>
+            `;
+        }
+        return `
+        <div class="message-page page-enter">
+            <div class="section-title">Messages</div>
+            <div class="chat-list">
+                ${userChats.length === 0 ? '<p class="empty-state">No messages yet.</p>' : userChats.map(msg => `
+                    <div class="chat-item" data-chat-id="${msg.id}">
+                        <div class="chat-avatar">
+                            <i class="fas ${msg.userAvatar || 'fa-user'}"></i>
+                        </div>
+                        <div class="chat-info">
+                            <div class="chat-header">
+                                <span class="chat-name">${msg.userName}</span>
+                                <span class="chat-time">${msg.lastTime}</span>
+                            </div>
+                            <div class="chat-snippet">${msg.lastMessage}</div>
+                        </div>
+                        ${msg.userUnreadCount > 0 ? `<div class="unread-dot">${msg.userUnreadCount}</div>` : ''}
+                    </div>
+                `).join('')}
+            </div>
+        </div>
+    `;
+    },
+    chat: (chatId) => {
+        const chat = userChats.find(m => m.id === chatId);
+        if (!chat) return navigate('message');
+
+        return `
+            <div class="chat-window page-enter">
+                <div class="chat-window-header">
+                    <button class="back-button" type="button" data-nav-back="message">
+                        <i class="fas fa-arrow-left"></i>
+                    </button>
+                    <div class="chat-window-title">
+                        <div class="chat-avatar mini"><i class="fas ${chat.userAvatar || 'fa-user'}"></i></div>
+                        <span>${chat.userName}</span>
+                    </div>
+                </div>
+                <div class="chat-body" id="chat-body">
+                    ${chat.messages.map(m => `
+                        <div class="msg-bubble ${m.fromMe ? 'me' : 'them'}">
+                            <div class="msg-text">${m.text}</div>
+                            <div class="msg-time">${m.time}</div>
+                        </div>
+                    `).join('')}
+                </div>
+                <div class="chat-footer">
+                    <input type="text" id="chat-input" placeholder="Type a message...">
+                    <button class="send-btn" onclick="sendRealMessage('${chat.id}')"><i class="fas fa-paper-plane"></i></button>
+                </div>
+            </div>
+        `;
+    },
+    profile: () => {
+        if (!currentUser) {
+            return `
+                <div class="profile-page page-enter">
+                    <div style="text-align: center; padding: 60px 20px;">
+                        <i class="fas fa-user-circle fa-5x" style="color: #ddd; margin-bottom: 20px;"></i>
+                        <h2>Welcome to 1688</h2>
+                        <p style="color: var(--light-text); margin-bottom: 30px;">Sign in to manage your orders, favorites, and chat with suppliers.</p>
+                        <button class="google-signin-btn" onclick="signInWithGoogle()">
+                            <i class="fab fa-google google-icon"></i>
+                            <span>Continue with Google</span>
+                        </button>
+                    </div>
+                </div>
+            `;
+        }
+
+        return `
+        <div class="profile-page page-enter">
+            <header class="profile-header-premium" style="background: #333;">
+                <div class="avatar-container">
+                    <div class="profile-avatar-premium profile-avatar-image-container">
+                        ${currentUser.photoURL ? `<img class="profile-user-image" src="${currentUser.photoURL}" alt="Profile avatar">` : `<i class="fas fa-user fa-2x"></i>`}
+                    </div>
+                </div>
+                <div class="profile-info-premium">
+                    <h2>${currentUser.displayName || 'Member'}</h2>
+                    <p style="color: rgba(255,255,255,0.7); font-size: 12px;">${currentUser.email}</p>
+                </div>
+            </header>
+
+            <section class="profile-card-group">
+                <div class="service-list">
+                    <div class="service-item" data-service="address">
+                        <div class="service-item-left">
+                            <i class="fas fa-map-marker-alt"></i>
+                            <span>Shipping Address</span>
+                        </div>
+                        <i class="fas fa-chevron-right chevron"></i>
+                    </div>
+                    <div class="service-item" data-service="security">
+                        <div class="service-item-left">
+                            <i class="fas fa-user-shield"></i>
+                            <span>Security Center</span>
+                        </div>
+                        <i class="fas fa-chevron-right chevron"></i>
+                    </div>
+                    <div class="service-item" data-service="help">
+                        <div class="service-item-left">
+                            <i class="fas fa-headset"></i>
+                            <span>Help & Customer Service</span>
+                        </div>
+                        <i class="fas fa-chevron-right chevron"></i>
+                    </div>
+                    <div class="service-item" data-service="about">
+                        <div class="service-item-left">
+                            <i class="fas fa-info-circle"></i>
+                            <span>About 1688 Electronic Mart</span>
+                        </div>
+                        <i class="fas fa-chevron-right chevron"></i>
+                    </div>
+                </div>
+            </section>
+
+            <div class="logout-container">
+                <button class="logout-btn" type="button" onclick="logout()">Log Out</button>
+            </div>
+        </div>
+    `;
+    },
+    orders: (status) => {
+        const filtered = status === 'all' ? mockOrders : mockOrders.filter(o => o.status === status);
+        const labels = {
+            all: 'All Orders',
+            unpaid: 'Pending Payment',
+            to_ship: 'To Ship',
+            to_receive: 'To Receive',
+            to_review: 'To Review',
+            refund: 'Refund/After-sale'
+        };
+
+        return `
+            <div class="orders-page page-enter">
+                <div class="orders-header">
+                    <button class="back-button" type="button" data-nav-back="profile">
+                        <i class="fas fa-arrow-left"></i>
+                        Back
+                    </button>
+                    <div class="section-title">${labels[status] || 'My Orders'}</div>
+                </div>
+                ${filtered.length === 0 ? `
+                    <div class="empty-state">
+                        <i class="fas fa-clipboard-list"></i>
+                        <p>No orders found in this category.</p>
+                    </div>
+                ` : `
+                    <div class="orders-list">
+                        ${filtered.map(order => `
+                            <div class="order-item">
+                                <div class="order-item-header">
+                                    <span>Order ID: ${order.id}</span>
+                                    <span class="order-status-tag status-${order.status}">${order.status.replace('_', ' ')}</span>
+                                </div>
+                                <div class="order-item-content">
+                                    <div class="order-item-img"><i class="fas ${order.icon}"></i></div>
+                                    <div class="order-item-info">
+                                        <div class="order-item-name">${order.name}</div>
+                                        <div class="order-item-price">¥${order.price.toFixed(2)}</div>
+                                    </div>
+                                </div>
+                                <div class="order-item-footer">
+                                    <span class="order-date">${order.date}</span>
+                                    <div class="order-actions">
+                                        <button class="mini-btn" type="button">Details</button>
+                                        ${order.status === 'unpaid' ? '<button class="mini-btn highlight" type="button">Pay Now</button>' : ''}
+                                    </div>
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                `}
+            </div>
+        `;
+    },
+    address: () => `
+        <div class="service-page page-enter">
+            <div class="orders-header">
+                <button class="back-button" type="button" data-nav-back="profile">
+                    <i class="fas fa-arrow-left"></i>
+                    Back
+                </button>
+                <div class="section-title">Shipping Address</div>
+            </div>
+            <div class="address-list">
+                ${addresses.length === 0 ? '<div class="empty-state"><i class="fas fa-map-marker-alt"></i><p>No addresses saved yet.</p></div>' : addresses.map((address, index) => `
+                    <div class="address-item ${index === 0 ? 'active' : ''}">
+                        <div class="address-header">
+                            <span class="name">${address.name}</span>
+                            <span class="phone">${address.phone}</span>
+                        </div>
+                        <div class="address-content">
+                            <div class="address-label">${address.label}</div>
+                            <div>${address.address}</div>
+                            <div>${address.city}, ${address.district}, ${address.postcode}</div>
+                        </div>
+                        <div class="address-footer">
+                            <span class="default-tag">${index === 0 ? 'Default' : 'Saved'}</span>
+                            <div class="address-actions">
+                                <button class="mini-btn edit-address" type="button" data-address-id="${address.id}">Edit</button>
+                                <button class="mini-btn delete-address" type="button" data-address-id="${address.id}">Delete</button>
+                            </div>
+                        </div>
+                    </div>
+                `).join('')}
+                <button class="add-address-btn" type="button">+ Add New Address</button>
+                ${renderAddressForm()}
+            </div>
+        </div>
+    `,
+    security: () => `
+        <div class="service-page page-enter">
+            <div class="orders-header">
+                <button class="back-button" type="button" data-nav-back="profile">
+                    <i class="fas fa-arrow-left"></i>
+                    Back
+                </button>
+                <div class="section-title">Security Center</div>
+            </div>
+            <div class="service-list profile-card-group">
+                <div class="service-item"><span>Modify Password</span><i class="fas fa-chevron-right chevron"></i></div>
+                <div class="service-item"><span>Binding Phone</span><i class="fas fa-chevron-right chevron"></i></div>
+                <div class="service-item"><span>Payment Security</span><i class="fas fa-chevron-right chevron"></i></div>
+                <div class="service-item delete-account-item" style="margin-top: 20px; border-top: 1px solid #eee; padding-top: 20px;">
+                    <span style="color: #ff4d4f; font-weight: bold;">Delete Account Permanently</span>
+                    <i class="fas fa-chevron-right chevron"></i>
+                </div>
+            </div>
+        </div>
+    `,
+    help: () => `
+        <div class="service-page page-enter">
+            <div class="orders-header">
+                <button class="back-button" type="button" data-nav-back="profile">
+                    <i class="fas fa-arrow-left"></i>
+                    Back
+                </button>
+                <div class="section-title">Help & Customer Service</div>
+            </div>
+            <div class="help-section">
+                <div class="help-search">
+                    <i class="fas fa-search"></i>
+                    <input type="text" placeholder="How can we help you?">
+                </div>
+                <div class="faq-list profile-card-group">
+                    <div class="service-item"><span>How to track my order?</span><i class="fas fa-chevron-right chevron"></i></div>
+                    <div class="service-item"><span>Refund policy</span><i class="fas fa-chevron-right chevron"></i></div>
+                    <div class="service-item"><span>Contacting the supplier</span><i class="fas fa-chevron-right chevron"></i></div>
+                </div>
+                <button class="contact-btn">Live Chat Support</button>
+            </div>
+        </div>
+    `,
+    about: () => `
+        <div class="service-page page-enter">
+            <div class="orders-header">
+                <button class="back-button" type="button" data-nav-back="profile">
+                    <i class="fas fa-arrow-left"></i>
+                    Back
+                </button>
+                <div class="section-title">About Us</div>
+            </div>
+            <div class="about-content">
+                <div class="about-logo">
+                    <div class="profile-avatar-premium" style="margin: 0 auto 15px; background: var(--primary-color); color: white;">
+                        <i class="fas fa-store fa-2x"></i>
+                    </div>
+                    <h3 style="text-align: center;">1688 Electronic Mart</h3>
+                    <p style="text-align: center; color: var(--light-text); font-size: 12px;">Version 2.0.4</p>
+                </div>
+                <div class="service-list profile-card-group" style="margin-top: 30px;">
+                    <div class="service-item"><span>Terms of Service</span><i class="fas fa-chevron-right chevron"></i></div>
+                    <div class="service-item"><span>Privacy Policy</span><i class="fas fa-chevron-right chevron"></i></div>
+                    <div class="service-item"><span>Official Website</span><i class="fas fa-chevron-right chevron"></i></div>
+                </div>
+            </div>
+        </div>
+    `,
+    followed: () => `
+        <div class="followed-page page-enter">
+            <div class="orders-header">
+                <button class="back-button" type="button" data-nav-back="profile">
+                    <i class="fas fa-arrow-left"></i>
+                    Back
+                </button>
+                <div class="section-title">Followed Shops</div>
+            </div>
+            <div class="shop-list">
+                ${followedShops.map(shop => `
+                    <div class="shop-card">
+                        <div class="shop-icon"><i class="fas ${shop.icon}"></i></div>
+                        <div class="shop-info">
+                            <div class="shop-name">${shop.name}</div>
+                            <div class="shop-meta">
+                                <span><i class="fas fa-star" style="color:#faad14"></i> ${shop.rating}</span>
+                                <span>${shop.products} Products</span>
+                            </div>
+                            <div class="shop-location">${shop.location}, China</div>
+                        </div>
+                        <button class="enter-shop-btn" onclick="document.getElementById('search-input').value='${shop.name.split(' ')[0]}'; navigate('home', '${shop.name.split(' ')[0]}')">Enter</button>
+                    </div>
+                `).join('')}
+            </div>
+        </div>
+    `,
+    'checkout-success': (boughtItems = []) => `
+        <div class="success-page page-enter">
+            <div class="success-icon">
+                <i class="fas fa-check-circle"></i>
+            </div>
+            <h1>Order Successful!</h1>
+            <p>Your payment for ${boughtItems.length} item(s) has been processed.</p>
+            <div class="bought-summary">
+                ${boughtItems.map(item => `
+                    <div class="summary-item">
+                        <i class="fas ${item.images ? item.images[0] : item.image}"></i>
+                        <span>${item.title || item.name}</span>
+                    </div>
+                `).join('')}
+            </div>
+            <div class="order-id">Transaction ID: TXN-${Math.floor(Math.random() * 1000000)}</div>
+            <button class="primary-btn go-home-btn" type="button">Continue Sourcing</button>
+        </div>
+    `
+};
+
+function renderAdvertDetail(adId) {
+    const ad = featuredAds.find(item => item.id === adId);
+
+    if (!ad) {
+        return pages.home();
+    }
+
+    return `
+        <section class="advert-detail page-enter">
+            <button class="back-button" type="button">
+                <i class="fas fa-arrow-left"></i>
+                Back
+            </button>
+
+            <div class="detail-hero">
+                <div class="fav-overlay-detail ${favorites.some(f => f.id === ad.id) ? 'active' : ''}" data-fav-id="${ad.id}" data-fav-type="ad">
+                    <i class="fas fa-heart"></i>
+                </div>
+                <div class="detail-gallery-main">
+                    <i class="fas ${ad.images[0]} fa-3x" id="main-gallery-icon"></i>
+                </div>
+                <div class="detail-gallery-thumbs">
+                    ${ad.images.slice(0, 3).map((img, idx) => `
+                        <div class="thumb-node ${idx === 0 ? 'active' : ''}" onclick="document.getElementById('main-gallery-icon').className='fas ${img} fa-3x'; document.querySelectorAll('.thumb-node').forEach(t=>t.classList.remove('active')); this.classList.add('active');">
+                            <i class="fas ${img}"></i>
+                        </div>
+                    `).join('')}
+                </div>
+                <div class="detail-badge">${ad.badge}</div>
+            </div>
+
+            <div class="detail-card">
+                <div class="condition-badge ${ad.condition.toLowerCase().includes('new') ? 'new' : 'used'}" style="margin-bottom: 10px;">${ad.condition}</div>
+                <h1>${ad.title}</h1>
+                <p class="detail-short">${ad.short}</p>
+                <div class="detail-price">¥${ad.price.toFixed(2)}</div>
+                <p class="detail-description">${ad.description}</p>
+
+                <div class="detail-list">
+                    ${ad.details.map(item => `<div class="detail-item"><i class="fas fa-check-circle"></i><span>${item}</span></div>`).join('')}
+                </div>
+
+                <div class="detail-actions">
+                    <button class="primary-btn" type="button">${ad.cta}</button>
+                    <button class="secondary-btn add-to-cart-ad" data-ad-id="${ad.id}" type="button">Add to Cart</button>
+                </div>
+            </div>
+        </section>
+    `;
+}
+
+function renderProductDetail(productId) {
+    const product = mockProducts.find(p => p.id === parseInt(productId));
+
+    if (!product) {
+        return pages.home();
+    }
+
+    const images = product.images && product.images.length > 0 ? product.images : [product.image || 'fa-image'];
+
+    return `
+        <section class="product-detail page-enter">
+            <button class="back-button" type="button">
+                <i class="fas fa-arrow-left"></i>
+                Back
+            </button>
+
+            <div class="detail-hero">
+                <div class="fav-overlay-detail ${favorites.some(f => f.id === product.id) ? 'active' : ''}" data-fav-id="${product.id}" data-fav-type="prod">
+                    <i class="fas fa-heart"></i>
+                </div>
+                <div class="detail-gallery" id="product-gallery">
+                    ${images.map((img, i) => `
+                        <div class="carousel-slide ${i === 0 ? 'active' : ''}">
+                             <i class="fas ${img.startsWith('fa-') ? img : 'fa-image'} fa-3x"></i>
+                             ${!img.startsWith('fa-') ? `<img src="${img}" alt="Product Image">` : ''}
+                        </div>
+                    `).join('')}
+                    <div class="gallery-dots">
+                        ${images.map((_, i) => `<div class="dot ${i === 0 ? 'active' : ''}"></div>`).join('')}
+                    </div>
+                </div>
+                <div class="detail-badge">Recommended</div>
+            </div>
+
+            <div class="detail-card">
+                <div class="condition-badge ${product.condition.toLowerCase().includes('new') ? 'new' : 'used'}" style="margin-bottom: 10px;">${product.condition}</div>
+                <h1>${product.name}</h1>
+                <p class="detail-company">${product.company}</p>
+                <div class="detail-price">¥${product.price.toFixed(2)}</div>
+                <p class="detail-description">${product.description}</p>
+
+                <div class="detail-list">
+                    <div class="detail-item"><i class="fas fa-truck"></i><span>Direct shipping from manufacturer</span></div>
+                    <div class="detail-item"><i class="fas fa-shield-alt"></i><span>Quality guaranteed by 1688 Electronic Mart Inspection</span></div>
+                </div>
+
+                <div class="detail-actions">
+                    <button class="primary-btn" type="button">Buy Now</button>
+                    <button class="secondary-btn add-to-cart-prod" data-product-id="${product.id}" type="button">Add to Cart</button>
+                </div>
+            </div>
+        </section>
+    `;
+}
+
+function updateActiveNav(pageId) {
+    const profileSubPages = ['orders', 'address', 'security', 'help', 'about', 'favorites', 'footprints', 'followed'];
+    const targetPage = (pageId === 'advert-detail' || pageId === 'product-detail' || pageId === 'checkout-success') ? 'home' :
+                       (profileSubPages.includes(pageId) ? 'profile' : pageId);
+
+    document.querySelectorAll('.nav-item').forEach(item => {
+        item.classList.remove('active');
+        if (item.dataset.page === targetPage) {
+            item.classList.add('active');
+        }
+    });
+}
+
+function navigate(pageId, itemId = null, category = null, sortBy = 'default') {
+    const content = document.getElementById('app-content');
+    const mainHeader = document.querySelector('.header');
+    const bottomNav = document.querySelector('.bottom-nav');
+
+    // Reset potential state from previous navigation
+    document.body.classList.remove('chat-mode');
+
+    // Show/Hide main site navigation elements
+    if (pageId === 'chat') {
+        mainHeader.style.setProperty('display', 'none', 'important');
+        bottomNav.style.setProperty('display', 'none', 'important');
+        document.body.style.paddingBottom = '0';
+        document.body.classList.add('chat-mode');
+    } else {
+        mainHeader.style.display = 'block';
+        bottomNav.style.display = 'flex';
+        document.body.style.paddingBottom = '60px';
+    }
+
+    // Determine if loading is needed (tab switches)
+    const isTabSwitch = ['home', 'cart', 'message', 'profile'].includes(pageId) && !itemId && !category && sortBy === 'default';
+    if (isTabSwitch) {
+        content.innerHTML = `<div class="loading-container"><div class="spinner"></div></div>`;
+    }
+
+    // Apply fade-out transition
+    content.style.opacity = '0';
+    content.style.transform = 'translateY(10px)';
+    content.style.transition = 'opacity 0.2s ease, transform 0.2s ease';
+
+    const delay = isTabSwitch ? 600 : 200;
+
+    setTimeout(() => {
+        // Clear transform to prevent breaking 'fixed' positioning inside content
+        if (pageId === 'chat') {
+            content.style.transform = 'none';
+        }
+
+        if (pageId === 'advert-detail' && itemId) {
+            trackFootprint(itemId, 'ad');
+            content.innerHTML = renderAdvertDetail(itemId);
+        } else if (pageId === 'product-detail' && itemId) {
+            trackFootprint(itemId, 'prod');
+            content.innerHTML = renderProductDetail(itemId);
+        } else if (pageId === 'orders') {
+            content.innerHTML = pages.orders(itemId || 'all');
+        } else if (pageId === 'home') {
+            content.innerHTML = pages.home(itemId || '', category, sortBy);
+        } else if (pageId === 'chat' && itemId) {
+            content.innerHTML = pages.chat(itemId);
+        } else if (pageId === 'checkout-success') {
+            content.innerHTML = pages['checkout-success'](itemId);
+        } else if (pages[pageId]) {
+            content.innerHTML = pages[pageId]();
+        }
+
+        content.style.opacity = '1';
+        // Only re-apply transform if NOT in chat mode to avoid layout issues
+        if (pageId !== 'chat') {
+            content.style.transform = 'translateY(0)';
+        }
+
+        updateActiveNav(pageId);
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+    }, delay);
+}
+
+document.querySelectorAll('.nav-item').forEach(item => {
+    item.addEventListener('click', () => {
+        navigate(item.dataset.page);
+    });
+});
+
+document.getElementById('app-content').addEventListener('click', (event) => {
+    const advertCard = event.target.closest('.advert-card');
+    if (advertCard) {
+        // Prevent click if clicking the favorite overlay
+        if (event.target.closest('.fav-overlay')) return;
+        navigate('advert-detail', advertCard.dataset.adId);
+        return;
+    }
+
+    const productCard = event.target.closest('.product-card');
+    if (productCard) {
+        // Prevent click if clicking the favorite overlay
+        if (event.target.closest('.fav-overlay')) return;
+        const type = productCard.dataset.itemType;
+        if (type === 'ad') {
+            navigate('advert-detail', productCard.dataset.productId);
+        } else {
+            navigate('product-detail', productCard.dataset.productId);
+        }
+        return;
+    }
+
+    const favBtn = event.target.closest('.fav-overlay, .fav-overlay-detail');
+    if (favBtn) {
+        toggleFavorite(favBtn.dataset.favId, favBtn.dataset.favType);
+        favBtn.classList.toggle('active');
+        return;
+    }
+
+    const footprintItem = event.target.closest('.footprint-item');
+    if (footprintItem) {
+        const type = footprintItem.dataset.itemType;
+        if (type === 'ad') {
+            navigate('advert-detail', footprintItem.dataset.productId);
+        } else {
+            navigate('product-detail', footprintItem.dataset.productId);
+        }
+        return;
+    }
+
+    const sourcingTool = event.target.closest('.grid-item');
+    if (sourcingTool && sourcingTool.dataset.nav) {
+        navigate(sourcingTool.dataset.nav);
+        return;
+    }
+
+    const backButton = event.target.closest('.back-button');
+    if (backButton) {
+        const navBack = backButton.dataset.navBack;
+        navigate(navBack || 'home');
+        return;
+    }
+
+    if (event.target.closest('.go-shopping')) {
+        navigate('home');
+        return;
+    }
+
+    const orderFilterBtn = event.target.closest('.order-filter-btn');
+    if (orderFilterBtn) {
+        navigate('orders', orderFilterBtn.dataset.status);
+        return;
+    }
+
+    const viewAllOrders = event.target.closest('.view-all-orders');
+    if (viewAllOrders) {
+        navigate('orders', 'all');
+        return;
+    }
+
+    const clearHistory = event.target.closest('.clear-history-btn');
+    if (clearHistory) {
+        recentSearches = [];
+        localStorage.removeItem('recentSearches');
+        if (content.querySelector('.home-page')) content.innerHTML = pages.home();
+        return;
+    }
+
+    const faqItem = event.target.closest('.faq-list .service-item, .security .service-item');
+    if (faqItem && !faqItem.dataset.service) {
+        alert(`Information for "${faqItem.innerText.trim()}" is coming soon! Our factory policy is being updated.`);
+        return;
+    }
+
+    const serviceItem = event.target.closest('.service-item');
+    if (serviceItem && serviceItem.dataset.service) {
+        navigate(serviceItem.dataset.service);
+        return;
+    }
+
+    const chatItem = event.target.closest('.chat-item');
+    if (chatItem) {
+        navigate('chat', chatItem.dataset.chatId);
+        return;
+    }
+
+    const addAddressBtn = event.target.closest('.add-address-btn');
+    if (addAddressBtn) {
+        addressFormState = { mode: 'new', id: null };
+        navigate('address');
+        return;
+    }
+
+    const editAddressBtn = event.target.closest('.edit-address');
+    if (editAddressBtn) {
+        addressFormState = { mode: 'edit', id: Number(editAddressBtn.dataset.addressId) };
+        navigate('address');
+        return;
+    }
+
+    const deleteAddressBtn = event.target.closest('.delete-address');
+    if (deleteAddressBtn) {
+        const id = Number(deleteAddressBtn.dataset.addressId);
+        addresses = addresses.filter(address => address.id !== id);
+        if (addresses.length === 0) {
+            addressFormState = { mode: 'new', id: null };
+        }
+        navigate('address');
+        return;
+    }
+
+    const cancelAddressBtn = event.target.closest('.cancel-address-btn');
+    if (cancelAddressBtn) {
+        addressFormState = { mode: 'new', id: null };
+        navigate('address');
+        return;
+    }
+
+    const deleteAccountBtn = event.target.closest('.delete-account-item');
+    if (deleteAccountBtn) {
+        deleteAccount();
+        return;
+    }
+
+    const removeBtn = event.target.closest('.remove-btn');
+    if (removeBtn) {
+        removeFromCart(removeBtn.dataset.removeId);
+        return;
+    }
+
+    const addAdBtn = event.target.closest('.add-to-cart-ad');
+    if (addAdBtn) {
+        addToCart(addAdBtn.dataset.adId, 'ad');
+        return;
+    }
+
+    const addProdBtn = event.target.closest('.add-to-cart-prod');
+    if (addProdBtn) {
+        addToCart(addProdBtn.dataset.productId, 'prod');
+        return;
+    }
+
+    const uploadInput = event.target.closest('.profile-upload-input');
+    if (uploadInput) {
+        const file = uploadInput.files && uploadInput.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = function () {
+            profileImage = reader.result;
+            try {
+                localStorage.setItem('profileImage', profileImage);
+            } catch (error) {
+                // Ignore storage issues in restricted browsers.
+            }
+            navigate('profile');
+        };
+        reader.readAsDataURL(file);
+        return;
+    }
+
+    const sendBtn = event.target.closest('.send-btn');
+    if (sendBtn) {
+        const chatWindow = document.querySelector('.chat-window');
+        const chatId = chatWindow ? mockMessages.find(m => document.body.innerText.includes(m.sender))?.id : null;
+        if (chatId) sendMessage(chatId);
+        return;
+    }
+
+    const shopNowBtn = event.target.closest('.shop-now-btn');
+    if (shopNowBtn) {
+        document.getElementById('recommended-section').scrollIntoView({ behavior: 'smooth' });
+        return;
+    }
+
+    const viewDealsBtn = event.target.closest('.view-deals-btn');
+    if (viewDealsBtn) {
+        document.getElementById('featured-deals-section').scrollIntoView({ behavior: 'smooth' });
+        return;
+    }
+
+    const goHomeBtn = event.target.closest('.go-home-btn');
+    if (goHomeBtn) {
+        navigate('home');
+        return;
+    }
+
+    const clearSearchBtn = event.target.closest('.clear-search-btn');
+    if (clearSearchBtn) {
+        const searchInput = document.getElementById('search-input');
+        if (searchInput) searchInput.value = '';
+        navigate('home');
+        return;
+    }
+});
+
+document.getElementById('search-input').addEventListener('input', (e) => {
+    const query = e.target.value;
+    const content = document.getElementById('app-content');
+    const isHome = content.querySelector('.home-page');
+
+    if (query.length > 2 && !recentSearches.includes(query)) {
+        // Debounced ideally, but here we add on enter or after delay
+    }
+
+    if (isHome) {
+        content.innerHTML = pages.home(query);
+        updateActiveNav('home');
+    } else {
+        navigate('home', query);
+    }
+});
+
+document.getElementById('search-input').addEventListener('focus', () => {
+    const historyDropdown = document.getElementById('search-history-container');
+    if (historyDropdown && recentSearches.length > 0) {
+        historyDropdown.style.display = 'block';
+    }
+});
+
+document.getElementById('search-input').addEventListener('keypress', (e) => {
+    if (e.key === 'Enter') {
+        const query = e.target.value.trim();
+        if (query && !recentSearches.includes(query)) {
+            recentSearches.unshift(query);
+            if (recentSearches.length > 8) recentSearches.pop();
+            localStorage.setItem('recentSearches', JSON.stringify(recentSearches));
+        }
+        const historyDropdown = document.getElementById('search-history-container');
+        if (historyDropdown) historyDropdown.style.display = 'none';
+        e.target.blur();
+    }
+});
+
+// Click outside to close search history
+document.addEventListener('click', (e) => {
+    if (!e.target.closest('.search-bar') && !e.target.closest('.search-history-dropdown')) {
+        const historyDropdown = document.getElementById('search-history-container');
+        if (historyDropdown) historyDropdown.style.display = 'none';
+    }
+});
+
+document.getElementById('app-content').addEventListener('change', (event) => {
+    const uploadInput = event.target.closest('.profile-upload-input');
+    if (!uploadInput) return;
+
+    const file = uploadInput.files && uploadInput.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = function () {
+        profileImage = reader.result;
+        try {
+            localStorage.setItem('profileImage', profileImage);
+        } catch (error) {
+            // Ignore storage issues in restricted browsers.
+        }
+        navigate('profile');
+    };
+    reader.readAsDataURL(file);
+});
+
+document.getElementById('app-content').addEventListener('submit', (event) => {
+    if (event.target.matches('#address-form')) {
+        event.preventDefault();
+        saveAddress(new FormData(event.target));
+    }
+});
+
+// Register Service Worker for PWA
+if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+        navigator.serviceWorker.register('./sw.js')
+            .then(reg => console.log('Service Worker Registered!', reg))
+            .catch(err => console.log('Service Worker Failed!', err));
+    });
+}
+
+// Carousel Auto-play
+setInterval(() => {
+    const slides = document.querySelectorAll('.carousel-slide');
+    if (slides.length < 2) return;
+
+    let activeIdx = Array.from(slides).findIndex(s => s.classList.contains('active'));
+    slides[activeIdx].classList.remove('active');
+
+    let nextIdx = (activeIdx + 1) % slides.length;
+    slides[nextIdx].classList.add('active');
+}, 5000);
+
+navigate('home');
