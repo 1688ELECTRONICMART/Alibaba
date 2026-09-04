@@ -120,6 +120,29 @@ input {
     opacity: 0.9;
 }
 
+.carousel-indicators {
+    position: absolute;
+    bottom: 8px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    gap: 6px;
+    z-index: 2;
+}
+
+.indicator-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.4);
+    transition: background 0.3s ease, transform 0.3s ease;
+}
+
+.indicator-dot.active {
+    background: #ffffff;
+    transform: scale(1.25);
+}
+
 /* Product Card Enhancement */
 .product-card {
     border: none;

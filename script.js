@@ -92,10 +92,15 @@ db.collection("notifications").orderBy("timestamp", "desc").limit(1).onSnapshot(
 
 rtdb.ref("adverts").on("value", (snapshot) => {
     const data = snapshot.val();
-    if (data) {
+    if (data && Object.keys(data).length > 0) {
         featuredAds = Object.values(data);
-        renderHomePageIfActive();
+    } else {
+        featuredAds = [
+            { id: 'ad1', title: 'Quality Electronics', short: 'Sourced from top manufacturers', icon: 'fa-microchip' },
+            { id: 'ad2', title: 'Fast Global Shipping', short: 'Door to door delivery', icon: 'fa-truck' }
+        ];
     }
+    renderHomePageIfActive();
 });
 
 function renderHomePageIfActive() {
@@ -521,12 +526,17 @@ const pages = {
                 ${featuredAds.map((ad, i) => `
                     <div class="carousel-slide ${i === 0 ? 'active' : ''}">
                         <div class="carousel-content">
-                            <h2>${ad.title}</h2>
-                            <p>${ad.short}</p>
+                            <h2>${ad.title || 'Special Promotion'}</h2>
+                            <p>${ad.short || ad.link || 'Quality components and electronics'}</p>
                         </div>
-                        <i class="fas ${ad.icon} fa-3x" style="margin-left: auto; opacity: 0.3;"></i>
+                        <i class="fas ${ad.icon || 'fa-rectangle-ad'} fa-3x" style="margin-left: auto; opacity: 0.3;"></i>
                     </div>
                 `).join('')}
+                ${featuredAds.length > 1 ? `
+                    <div class="carousel-indicators">
+                        ${featuredAds.map((_, i) => `<span class="indicator-dot ${i === 0 ? 'active' : ''}"></span>`).join('')}
+                    </div>
+                ` : ''}
             </div>
 
             <div class="category-grid">
@@ -1462,13 +1472,17 @@ if ('serviceWorker' in navigator) {
 // Carousel Auto-play
 setInterval(() => {
     const slides = document.querySelectorAll('.carousel-slide');
+    const dots = document.querySelectorAll('.indicator-dot');
     if (slides.length < 2) return;
 
     let activeIdx = Array.from(slides).findIndex(s => s.classList.contains('active'));
+    if (activeIdx === -1) activeIdx = 0;
     slides[activeIdx].classList.remove('active');
+    if (dots[activeIdx]) dots[activeIdx].classList.remove('active');
 
     let nextIdx = (activeIdx + 1) % slides.length;
     slides[nextIdx].classList.add('active');
+    if (dots[nextIdx]) dots[nextIdx].classList.add('active');
 }, 5000);
 
 // Routing Engine for Page Persistence
