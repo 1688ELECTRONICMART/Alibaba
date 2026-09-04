@@ -16,13 +16,8 @@ const auth = firebase.auth();
 const provider = new firebase.auth.GoogleAuthProvider();
 
 let currentUser = null;
-let mockProducts = [
-    { id: 'p1', name: 'Premium Components', price: 99.00, company: 'Mart Factory', condition: 'New', category: 'Electronics', image: 'fa-microchip' }
-];
-let featuredAds = [
-    { id: 'ad1', title: 'Quality Electronics', short: 'Sourced from top manufacturers', icon: 'fa-microchip' },
-    { id: 'ad2', title: 'Fast Global Shipping', short: 'Door to door delivery', icon: 'fa-truck' }
-];
+let mockProducts = [];
+let featuredAds = [];
 let mockCategories = [
     { id: 'c1', name: 'Phone', icon: 'fa-mobile-alt' },
     { id: 'c2', name: 'Electronics', icon: 'fa-bolt' },
