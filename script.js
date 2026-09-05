@@ -153,7 +153,11 @@ rtdb.ref("system/deployment").on("value", (snapshot) => {
 });
 
 function applyHotPatch(data) {
-    showNotificationToast("System Update", "Applying live improvements...");
+    const isForce = data.force_reload;
+    showNotificationToast(
+        isForce ? "Critical Update" : "System Update",
+        isForce ? "A mandatory update is being applied..." : "Applying live improvements..."
+    );
 
     // Show Progress Bar
     const progress = document.createElement('div');
@@ -161,8 +165,13 @@ function applyHotPatch(data) {
     document.body.appendChild(progress);
     setTimeout(() => progress.style.width = '100%', 50);
 
-    if (data.force_reload) {
-        setTimeout(() => location.reload(), 2000);
+    if (isForce) {
+        // Force Reload with countdown
+        setTimeout(() => {
+            progress.style.background = '#ff4d4f';
+            showNotificationToast("Reloading", "Refreshing to latest version...");
+            setTimeout(() => location.reload(), 1500);
+        }, 1000);
         return;
     }
 
