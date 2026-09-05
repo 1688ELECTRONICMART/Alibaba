@@ -300,22 +300,71 @@ function renderAddressForm() {
     `;
 }
 
+function renderThumbImage(imgSrcOrIcon, className = '') {
+    if (!imgSrcOrIcon) {
+        return `<i class="fas fa-image ${className}"></i>`;
+    }
+    const src = String(imgSrcOrIcon).trim();
+    if (src.startsWith('http://') || src.startsWith('https://') || src.startsWith('data:') || src.includes('/')) {
+        return `<img src="${src}" class="${className}" alt="Product" loading="lazy" onerror="this.onerror=null;this.parentElement.innerHTML='<i class=\\\'fas fa-image ${className}\\\'></i>';">`;
+    }
+    const iconClass = src.startsWith('fa-') ? src : `fa-${src}`;
+    return `<i class="fas ${iconClass} ${className}"></i>`;
+}
+
+window.switchProductDetailImage = function(src, el) {
+    const mainContainer = document.getElementById('product-gallery-main');
+    if (!mainContainer) return;
+    if (src.startsWith('http') || src.startsWith('data:')) {
+        mainContainer.innerHTML = `<img id="product-main-img" src="${src}" alt="Product" style="width: 100%; height: 100%; object-fit: contain;">`;
+    } else {
+        mainContainer.innerHTML = `<i id="product-main-img" class="fas ${src.startsWith('fa-') ? src : 'fa-image'} fa-4x" style="color: var(--primary-color);"></i>`;
+    }
+    document.querySelectorAll('.detail-gallery-thumbs .thumb-node').forEach(t => {
+        t.style.borderColor = '#eee';
+        t.classList.remove('active');
+    });
+    if (el) {
+        el.style.borderColor = 'var(--primary-color)';
+        el.classList.add('active');
+    }
+};
+
+window.switchAdvertDetailImage = function(src, el) {
+    const mainContainer = document.getElementById('advert-gallery-main');
+    if (!mainContainer) return;
+    if (src.startsWith('http') || src.startsWith('data:')) {
+        mainContainer.innerHTML = `<img id="advert-main-img" src="${src}" alt="Advert" style="width: 100%; height: 100%; object-fit: contain;">`;
+    } else {
+        mainContainer.innerHTML = `<i id="advert-main-img" class="fas ${src.startsWith('fa-') ? src : 'fa-rectangle-ad'} fa-4x" style="color: var(--primary-color);"></i>`;
+    }
+    document.querySelectorAll('.detail-gallery-thumbs .thumb-node').forEach(t => {
+        t.style.borderColor = '#eee';
+        t.classList.remove('active');
+    });
+    if (el) {
+        el.style.borderColor = 'var(--primary-color)';
+        el.classList.add('active');
+    }
+};
+
 function addToCart(itemId, type) {
+    const strId = String(itemId);
     let item;
     if (type === 'ad') {
-        item = featuredAds.find(ad => ad.id === itemId);
+        item = featuredAds.find(ad => String(ad.id) === strId) || mockProducts.find(p => String(p.id) === strId);
     } else {
-        item = mockProducts.find(p => p.id === parseInt(itemId));
+        item = mockProducts.find(p => String(p.id) === strId) || featuredAds.find(ad => String(ad.id) === strId);
     }
 
-    if (item && !cart.some(c => c.id === item.id)) {
+    if (item && !cart.some(c => String(c.id) === String(item.id))) {
         cart.push({ ...item, type });
         selectedCartItems.add(String(item.id));
         saveData();
         updateCartBadge();
-        alert(`${item.title || item.name} added to cart!`);
+        showNotificationToast("Cart Updated", `${item.title || item.name} added to cart!`);
     } else if (item) {
-        alert('Item is already in your cart.');
+        showNotificationToast("Notice", 'Item is already in your cart.');
     }
 }
 
@@ -389,29 +438,33 @@ function startChatWithSupplier(productName) {
 }
 
 function toggleFavorite(itemId, type) {
-    const id = type === 'prod' ? parseInt(itemId) : itemId;
-    const isFav = favorites.some(f => f.id === id);
+    const strId = String(itemId);
+    const isFav = favorites.some(f => String(f.id) === strId);
 
     if (isFav) {
-        favorites = favorites.filter(f => f.id !== id);
+        favorites = favorites.filter(f => String(f.id) !== strId);
     } else {
-        const item = type === 'ad' ? featuredAds.find(ad => ad.id === id) : mockProducts.find(p => p.id === id);
+        const item = (type === 'ad') 
+            ? (featuredAds.find(ad => String(ad.id) === strId) || mockProducts.find(p => String(p.id) === strId))
+            : (mockProducts.find(p => String(p.id) === strId) || featuredAds.find(ad => String(ad.id) === strId));
         if (item) favorites.push({ ...item, type });
     }
     saveData();
 
     const content = document.getElementById('app-content');
-    if (content.querySelector('.favorites-page')) {
+    if (content.querySelector('.favorites-page') && pages.favorites) {
         content.innerHTML = pages.favorites();
     }
 }
 
 function trackFootprint(itemId, type) {
-    const id = type === 'prod' ? parseInt(itemId) : itemId;
-    const item = type === 'ad' ? featuredAds.find(ad => ad.id === id) : mockProducts.find(p => p.id === id);
+    const strId = String(itemId);
+    const item = (type === 'ad') 
+        ? (featuredAds.find(ad => String(ad.id) === strId) || mockProducts.find(p => String(p.id) === strId))
+        : (mockProducts.find(p => String(p.id) === strId) || featuredAds.find(ad => String(ad.id) === strId));
 
     if (item) {
-        footprints = footprints.filter(f => f.id !== id);
+        footprints = footprints.filter(f => String(f.id) !== strId);
         footprints.unshift({ ...item, type });
         if (footprints.length > 30) footprints.pop();
         saveData();
@@ -539,7 +592,7 @@ const pages = {
 
             <div class="promo-carousel">
                 ${featuredAds.map((ad, i) => `
-                    <div class="carousel-slide ${i === 0 ? 'active' : ''}" style="${ad.imageUrl ? `background-image: linear-gradient(135deg, rgba(255, 106, 0, 0.8), rgba(219, 75, 0, 0.9)), url('${ad.imageUrl}'); background-size: cover; background-position: center;` : ''}">
+                    <div class="carousel-slide ${i === 0 ? 'active' : ''}" data-ad-id="${ad.id}" style="${ad.imageUrl ? `background-image: linear-gradient(135deg, rgba(255, 106, 0, 0.8), rgba(219, 75, 0, 0.9)), url('${ad.imageUrl}'); background-size: cover; background-position: center; cursor: pointer;` : 'cursor: pointer;'}">
                         <div class="carousel-content">
                             <h2>${ad.title || 'Special Promotion'}</h2>
                             <p>${ad.short || ad.link || 'Quality components and electronics'}</p>
@@ -581,22 +634,28 @@ const pages = {
                     </div>
                 ` : `
                     <div class="product-grid">
-                        ${filteredProducts.map((p, i) => `
+                        ${filteredProducts.map((p, i) => {
+                            const firstImg = (p.images && p.images.length > 0) ? p.images[0] : (p.imageUrl || p.image || p.icon);
+                            const cond = p.condition || 'New';
+                            const priceVal = Number(p.price || 0).toFixed(2);
+                            const isFavorite = favorites.some(f => String(f.id) === String(p.id));
+                            return `
                             <button class="product-card stagger-item" type="button" data-product-id="${p.id}" data-item-type="prod" style="animation-delay: ${i * 0.1}s">
-                            <div class="fav-overlay ${favorites.some(f => f.id === p.id) ? 'active' : ''}" data-fav-id="${p.id}" data-fav-type="prod">
-                                <i class="fas fa-heart"></i>
-                            </div>
+                                <div class="fav-overlay ${isFavorite ? 'active' : ''}" data-fav-id="${p.id}" data-fav-type="prod">
+                                    <i class="fas fa-heart"></i>
+                                </div>
                                 <div class="product-img">
-                                    <i class="fas ${p.images && p.images.length > 0 ? 'fa-image' : (p.image || 'fa-image')} fa-3x"></i>
+                                    ${renderThumbImage(firstImg)}
                                 </div>
                                 <div class="product-info">
-                                    <div class="condition-badge ${p.condition.toLowerCase().includes('new') ? 'new' : 'used'}">${p.condition}</div>
-                                    <div class="product-name">${p.name}</div>
-                                    <div class="product-price">¥${p.price.toFixed(2)}</div>
-                                    <div class="product-company">${p.company}</div>
+                                    <div class="condition-badge ${cond.toLowerCase().includes('new') ? 'new' : 'used'}">${cond}</div>
+                                    <div class="product-name">${p.name || p.title || 'Product'}</div>
+                                    <div class="product-price">¥${priceVal}</div>
+                                    <div class="product-company">${p.company || 'Electronics Supplier'}</div>
                                 </div>
                             </button>
-                        `).join('')}
+                            `;
+                        }).join('')}
                     </div>
                 `}
             </div>
@@ -627,7 +686,7 @@ const pages = {
                                 ${selectedCartItems.has(String(item.id)) ? 'checked' : ''}
                                 onchange="toggleCartItem('${item.id}')">
                             <div class="cart-item-img">
-                                <i class="fas ${item.images ? item.images[0] : item.image}"></i>
+                                ${renderThumbImage(item.images && item.images.length > 0 ? item.images[0] : (item.imageUrl || item.image || item.icon))}
                             </div>
                             <div class="cart-item-info">
                                 <div class="cart-item-name">${item.title || item.name}</div>
@@ -748,6 +807,20 @@ const pages = {
 
             <section class="profile-card-group">
                 <div class="service-list">
+                    <div class="service-item" data-service="favorites">
+                        <div class="service-item-left">
+                            <i class="fas fa-heart" style="color: #ff4d4f;"></i>
+                            <span>My Favorites</span>
+                        </div>
+                        <i class="fas fa-chevron-right chevron"></i>
+                    </div>
+                    <div class="service-item" data-service="footprints">
+                        <div class="service-item-left">
+                            <i class="fas fa-history" style="color: #1890ff;"></i>
+                            <span>Browsing History</span>
+                        </div>
+                        <i class="fas fa-chevron-right chevron"></i>
+                    </div>
                     <div class="service-item" data-service="address">
                         <div class="service-item-left">
                             <i class="fas fa-map-marker-alt"></i>
@@ -979,7 +1052,9 @@ const pages = {
             <div class="bought-summary">
                 ${boughtItems.map(item => `
                     <div class="summary-item">
-                        <i class="fas ${item.images ? item.images[0] : item.image}"></i>
+                        <div style="width: 36px; height: 36px; display: inline-flex; align-items: center; justify-content: center; overflow: hidden; border-radius: 6px; margin-right: 10px; background: #f4f4f4; flex-shrink: 0;">
+                            ${renderThumbImage(item.images && item.images.length > 0 ? item.images[0] : (item.imageUrl || item.image || item.icon))}
+                        </div>
                         <span>${item.title || item.name}</span>
                     </div>
                 `).join('')}
@@ -987,15 +1062,116 @@ const pages = {
             <div class="order-id">Transaction ID: TXN-${Math.floor(Math.random() * 1000000)}</div>
             <button class="primary-btn go-home-btn" type="button">Continue Sourcing</button>
         </div>
+    `,
+    favorites: () => `
+        <div class="favorites-page page-enter">
+            <div class="orders-header">
+                <button class="back-button" type="button" data-nav-back="profile">
+                    <i class="fas fa-arrow-left"></i>
+                    Back
+                </button>
+                <div class="section-title">My Favorites (${favorites.length})</div>
+            </div>
+            ${favorites.length === 0 ? `
+                <div class="empty-state">
+                    <i class="fas fa-heart"></i>
+                    <p>No favorites yet.</p>
+                </div>
+            ` : `
+                <div class="product-grid">
+                    ${favorites.map((p, i) => {
+                        const firstImg = (p.images && p.images.length > 0) ? p.images[0] : (p.imageUrl || p.image || p.icon);
+                        const cond = p.condition || 'New';
+                        const priceVal = Number(p.price || 0).toFixed(2);
+                        return `
+                        <button class="product-card stagger-item" type="button" data-product-id="${p.id}" data-item-type="${p.type || 'prod'}">
+                            <div class="fav-overlay active" data-fav-id="${p.id}" data-fav-type="${p.type || 'prod'}">
+                                <i class="fas fa-heart"></i>
+                            </div>
+                            <div class="product-img">
+                                ${renderThumbImage(firstImg)}
+                            </div>
+                            <div class="product-info">
+                                <div class="condition-badge ${cond.toLowerCase().includes('new') ? 'new' : 'used'}">${cond}</div>
+                                <div class="product-name">${p.name || p.title || 'Product'}</div>
+                                <div class="product-price">¥${priceVal}</div>
+                                <div class="product-company">${p.company || 'Electronics Supplier'}</div>
+                            </div>
+                        </button>
+                        `;
+                    }).join('')}
+                </div>
+            `}
+        </div>
+    `,
+    footprints: () => `
+        <div class="footprints-page page-enter">
+            <div class="orders-header">
+                <button class="back-button" type="button" data-nav-back="profile">
+                    <i class="fas fa-arrow-left"></i>
+                    Back
+                </button>
+                <div class="section-title">Browsing History (${footprints.length})</div>
+            </div>
+            ${footprints.length === 0 ? `
+                <div class="empty-state">
+                    <i class="fas fa-history"></i>
+                    <p>No browsing history yet.</p>
+                </div>
+            ` : `
+                <div class="product-grid">
+                    ${footprints.map((p, i) => {
+                        const firstImg = (p.images && p.images.length > 0) ? p.images[0] : (p.imageUrl || p.image || p.icon);
+                        const cond = p.condition || 'New';
+                        const priceVal = Number(p.price || 0).toFixed(2);
+                        return `
+                        <button class="product-card stagger-item" type="button" data-product-id="${p.id}" data-item-type="${p.type || 'prod'}">
+                            <div class="product-img">
+                                ${renderThumbImage(firstImg)}
+                            </div>
+                            <div class="product-info">
+                                <div class="condition-badge ${cond.toLowerCase().includes('new') ? 'new' : 'used'}">${cond}</div>
+                                <div class="product-name">${p.name || p.title || 'Product'}</div>
+                                <div class="product-price">¥${priceVal}</div>
+                                <div class="product-company">${p.company || 'Electronics Supplier'}</div>
+                            </div>
+                        </button>
+                        `;
+                    }).join('')}
+                </div>
+            `}
+        </div>
     `
 };
 
 function renderAdvertDetail(adId) {
-    const ad = featuredAds.find(item => item.id === adId);
+    let ad = featuredAds.find(item => String(item.id) === String(adId));
 
     if (!ad) {
+        ad = mockProducts.find(p => String(p.id) === String(adId));
+        if (ad) {
+            return renderProductDetail(adId);
+        }
         return pages.home();
     }
+
+    const images = (ad.images && ad.images.length > 0) 
+        ? ad.images 
+        : (ad.imageUrl ? [ad.imageUrl] : [ad.icon || 'fa-rectangle-ad']);
+
+    const condition = ad.condition || 'Featured';
+    const price = (ad.price !== undefined && ad.price !== null) ? Number(ad.price).toFixed(2) : null;
+    const title = ad.title || 'Featured Promotion';
+    const shortDesc = ad.short || ad.link || 'Quality components and electronics';
+    const description = ad.description || 'Verified manufacturer promotion with guaranteed supplier support.';
+    const rawDetails = ad.details || (ad.description ? [ad.description] : [
+        'Direct factory partner',
+        'Bulk order discount available',
+        'Official 1688 Electronic Mart verified supplier'
+    ]);
+    const details = Array.isArray(rawDetails) ? rawDetails : [rawDetails];
+    const badge = ad.badge || 'Featured Ad';
+    const cta = ad.cta || 'Contact Supplier';
 
     return `
         <section class="advert-detail page-enter">
@@ -1005,35 +1181,46 @@ function renderAdvertDetail(adId) {
             </button>
 
             <div class="detail-hero">
-                <div class="fav-overlay-detail ${favorites.some(f => f.id === ad.id) ? 'active' : ''}" data-fav-id="${ad.id}" data-fav-type="ad">
+                <div class="fav-overlay-detail ${favorites.some(f => String(f.id) === String(ad.id)) ? 'active' : ''}" data-fav-id="${ad.id}" data-fav-type="ad">
                     <i class="fas fa-heart"></i>
                 </div>
-                <div class="detail-gallery-main">
-                    <i class="fas ${ad.images[0]} fa-3x" id="main-gallery-icon"></i>
+                <div class="detail-gallery-main" id="advert-gallery-main">
+                    ${(images[0].startsWith('http') || images[0].startsWith('data:')) ? 
+                        `<img id="advert-main-img" src="${images[0]}" alt="${title}">` : 
+                        `<i id="advert-main-img" class="fas ${images[0].startsWith('fa-') ? images[0] : 'fa-rectangle-ad'} fa-4x" style="color: var(--primary-color);"></i>`
+                    }
                 </div>
-                <div class="detail-gallery-thumbs">
-                    ${ad.images.slice(0, 3).map((img, idx) => `
-                        <div class="thumb-node ${idx === 0 ? 'active' : ''}" onclick="document.getElementById('main-gallery-icon').className='fas ${img} fa-3x'; document.querySelectorAll('.thumb-node').forEach(t=>t.classList.remove('active')); this.classList.add('active');">
-                            <i class="fas ${img}"></i>
-                        </div>
-                    `).join('')}
-                </div>
-                <div class="detail-badge">${ad.badge}</div>
+                ${images.length > 1 ? `
+                    <div class="detail-gallery-thumbs">
+                        ${images.map((img, idx) => `
+                            <div class="thumb-node ${idx === 0 ? 'active' : ''}" onclick="switchAdvertDetailImage('${img}', this)">
+                                ${(img.startsWith('http') || img.startsWith('data:')) ? 
+                                    `<img src="${img}" alt="Thumbnail">` : 
+                                    `<i class="fas ${img.startsWith('fa-') ? img : 'fa-rectangle-ad'}"></i>`
+                                }
+                            </div>
+                        `).join('')}
+                    </div>
+                ` : ''}
+                <div class="detail-badge">${badge}</div>
             </div>
 
             <div class="detail-card">
-                <div class="condition-badge ${ad.condition.toLowerCase().includes('new') ? 'new' : 'used'}" style="margin-bottom: 10px;">${ad.condition}</div>
-                <h1>${ad.title}</h1>
-                <p class="detail-short">${ad.short}</p>
-                <div class="detail-price">¥${ad.price.toFixed(2)}</div>
-                <p class="detail-description">${ad.description}</p>
+                <div class="condition-badge ${condition.toLowerCase().includes('new') ? 'new' : 'used'}" style="margin-bottom: 10px;">${condition}</div>
+                <h1>${title}</h1>
+                <p class="detail-short">${shortDesc}</p>
+                ${price ? `<div class="detail-price">¥${price}</div>` : ''}
+                <p class="detail-description">${description}</p>
 
                 <div class="detail-list">
-                    ${ad.details.map(item => `<div class="detail-item"><i class="fas fa-check-circle"></i><span>${item}</span></div>`).join('')}
+                    ${details.map(item => `<div class="detail-item"><i class="fas fa-check-circle"></i><span>${item}</span></div>`).join('')}
                 </div>
 
                 <div class="detail-actions">
-                    <button class="primary-btn" type="button">${ad.cta}</button>
+                    ${ad.link && ad.link.startsWith('http') ? 
+                        `<button class="primary-btn" type="button" onclick="window.open('${ad.link}', '_blank')">${cta}</button>` : 
+                        `<button class="primary-btn buy-now-btn" data-ad-id="${ad.id}" data-item-type="ad" type="button">${cta}</button>`
+                    }
                     <button class="secondary-btn add-to-cart-ad" data-ad-id="${ad.id}" type="button">Add to Cart</button>
                 </div>
             </div>
@@ -1042,13 +1229,30 @@ function renderAdvertDetail(adId) {
 }
 
 function renderProductDetail(productId) {
-    const product = mockProducts.find(p => p.id === parseInt(productId));
+    let product = mockProducts.find(p => String(p.id) === String(productId));
 
     if (!product) {
+        product = featuredAds.find(ad => String(ad.id) === String(productId));
+        if (product) {
+            return renderAdvertDetail(productId);
+        }
         return pages.home();
     }
 
-    const images = product.images && product.images.length > 0 ? product.images : [product.image || 'fa-image'];
+    const images = (product.images && product.images.length > 0) 
+        ? product.images 
+        : (product.imageUrl ? [product.imageUrl] : [product.image || product.icon || 'fa-image']);
+
+    const condition = product.condition || 'New';
+    const price = Number(product.price || 0).toFixed(2);
+    const company = product.company || 'Electronics Supplier';
+    const name = product.name || product.title || 'Electronic Component';
+    const description = product.description || 'Verified authentic electronics item sourced directly from certified manufacturers on 1688 Mart.';
+    const rawDetails = product.manufacturerDetails || product.details || [
+        'Direct shipping from manufacturer',
+        'Quality guaranteed by 1688 Electronic Mart Inspection'
+    ];
+    const detailsList = Array.isArray(rawDetails) ? rawDetails : [rawDetails];
 
     return `
         <section class="product-detail page-enter">
@@ -1058,37 +1262,43 @@ function renderProductDetail(productId) {
             </button>
 
             <div class="detail-hero">
-                <div class="fav-overlay-detail ${favorites.some(f => f.id === product.id) ? 'active' : ''}" data-fav-id="${product.id}" data-fav-type="prod">
+                <div class="fav-overlay-detail ${favorites.some(f => String(f.id) === String(product.id)) ? 'active' : ''}" data-fav-id="${product.id}" data-fav-type="prod">
                     <i class="fas fa-heart"></i>
                 </div>
-                <div class="detail-gallery" id="product-gallery">
-                    ${images.map((img, i) => `
-                        <div class="carousel-slide ${i === 0 ? 'active' : ''}">
-                             <i class="fas ${img.startsWith('fa-') ? img : 'fa-image'} fa-3x"></i>
-                             ${!img.startsWith('fa-') ? `<img src="${img}" alt="Product Image">` : ''}
-                        </div>
-                    `).join('')}
-                    <div class="gallery-dots">
-                        ${images.map((_, i) => `<div class="dot ${i === 0 ? 'active' : ''}"></div>`).join('')}
-                    </div>
+                <div class="detail-gallery-main" id="product-gallery-main">
+                    ${(images[0].startsWith('http') || images[0].startsWith('data:')) ? 
+                        `<img id="product-main-img" src="${images[0]}" alt="${name}">` : 
+                        `<i id="product-main-img" class="fas ${images[0].startsWith('fa-') ? images[0] : 'fa-image'} fa-4x" style="color: var(--primary-color);"></i>`
+                    }
                 </div>
+                ${images.length > 1 ? `
+                    <div class="detail-gallery-thumbs">
+                        ${images.map((img, idx) => `
+                            <div class="thumb-node ${idx === 0 ? 'active' : ''}" onclick="switchProductDetailImage('${img}', this)">
+                                ${(img.startsWith('http') || img.startsWith('data:')) ? 
+                                    `<img src="${img}" alt="Thumbnail">` : 
+                                    `<i class="fas ${img.startsWith('fa-') ? img : 'fa-image'}"></i>`
+                                }
+                            </div>
+                        `).join('')}
+                    </div>
+                ` : ''}
                 <div class="detail-badge">Recommended</div>
             </div>
 
             <div class="detail-card">
-                <div class="condition-badge ${product.condition.toLowerCase().includes('new') ? 'new' : 'used'}" style="margin-bottom: 10px;">${product.condition}</div>
-                <h1>${product.name}</h1>
-                <p class="detail-company">${product.company}</p>
-                <div class="detail-price">¥${product.price.toFixed(2)}</div>
-                <p class="detail-description">${product.description}</p>
+                <div class="condition-badge ${condition.toLowerCase().includes('new') ? 'new' : 'used'}" style="margin-bottom: 10px;">${condition}</div>
+                <h1>${name}</h1>
+                <p class="detail-company">${company}</p>
+                <div class="detail-price">¥${price}</div>
+                <p class="detail-description">${description}</p>
 
                 <div class="detail-list">
-                    <div class="detail-item"><i class="fas fa-truck"></i><span>Direct shipping from manufacturer</span></div>
-                    <div class="detail-item"><i class="fas fa-shield-alt"></i><span>Quality guaranteed by 1688 Electronic Mart Inspection</span></div>
+                    ${detailsList.map(item => `<div class="detail-item"><i class="fas fa-check-circle"></i><span>${item}</span></div>`).join('')}
                 </div>
 
                 <div class="detail-actions">
-                    <button class="primary-btn" type="button">Buy Now</button>
+                    <button class="primary-btn buy-now-btn" data-product-id="${product.id}" data-item-type="prod" type="button">Buy Now</button>
                     <button class="secondary-btn add-to-cart-prod" data-product-id="${product.id}" type="button">Add to Cart</button>
                 </div>
             </div>
@@ -1198,6 +1408,19 @@ document.querySelectorAll('.nav-item').forEach(item => {
 });
 
 document.getElementById('app-content').addEventListener('click', (event) => {
+    const promoSlide = event.target.closest('.promo-carousel .carousel-slide');
+    if (promoSlide && promoSlide.dataset.adId) {
+        if (event.target.closest('.fav-overlay')) return;
+        const adId = promoSlide.dataset.adId;
+        const ad = featuredAds.find(a => String(a.id) === String(adId));
+        if (ad && ad.link && ad.link.startsWith('http')) {
+            window.open(ad.link, '_blank');
+        } else {
+            navigate('advert-detail', adId);
+        }
+        return;
+    }
+
     const advertCard = event.target.closest('.advert-card');
     if (advertCard) {
         // Prevent click if clicking the favorite overlay
@@ -1211,11 +1434,21 @@ document.getElementById('app-content').addEventListener('click', (event) => {
         // Prevent click if clicking the favorite overlay
         if (event.target.closest('.fav-overlay')) return;
         const type = productCard.dataset.itemType;
+        const itemId = productCard.dataset.productId || productCard.dataset.adId;
         if (type === 'ad') {
-            navigate('advert-detail', productCard.dataset.productId);
+            navigate('advert-detail', itemId);
         } else {
-            navigate('product-detail', productCard.dataset.productId);
+            navigate('product-detail', itemId);
         }
+        return;
+    }
+
+    const buyNowBtn = event.target.closest('.buy-now-btn');
+    if (buyNowBtn) {
+        const id = buyNowBtn.dataset.productId || buyNowBtn.dataset.adId;
+        const type = buyNowBtn.dataset.itemType || (buyNowBtn.dataset.productId ? 'prod' : 'ad');
+        addToCart(id, type);
+        navigate('cart');
         return;
     }
 
