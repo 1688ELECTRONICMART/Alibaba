@@ -2,6 +2,7 @@
 const firebaseConfig = {
     apiKey: "AIzaSyDvzRnxMv6FMZdx0obAZUAIUyTQtu1A-90",
     authDomain: "electronic-mart-1688.firebaseapp.com",
+    databaseURL: "https://electronic-mart-1688-default-rtdb.firebaseio.com",
     projectId: "electronic-mart-1688",
     storageBucket: "electronic-mart-1688.firebasestorage.app",
     messagingSenderId: "988016654865",
@@ -90,17 +91,31 @@ db.collection("notifications").orderBy("timestamp", "desc").limit(1).onSnapshot(
     });
 });
 
+// Dual Adverts Sync (Firestore & Realtime Database)
+db.collection("adverts").onSnapshot((snapshot) => {
+    if (snapshot && !snapshot.empty) {
+        const firestoreAds = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        if (firestoreAds.length > 0) {
+            featuredAds = firestoreAds;
+            renderHomePageIfActive();
+        }
+    }
+}, (err) => {
+    console.warn("Firestore adverts listener:", err);
+});
+
 rtdb.ref("adverts").on("value", (snapshot) => {
     const data = snapshot.val();
     if (data && Object.keys(data).length > 0) {
         featuredAds = Object.values(data);
-    } else {
+        renderHomePageIfActive();
+    } else if (featuredAds.length === 0) {
         featuredAds = [
             { id: 'ad1', title: 'Quality Electronics', short: 'Sourced from top manufacturers', icon: 'fa-microchip' },
             { id: 'ad2', title: 'Fast Global Shipping', short: 'Door to door delivery', icon: 'fa-truck' }
         ];
+        renderHomePageIfActive();
     }
-    renderHomePageIfActive();
 });
 
 function renderHomePageIfActive() {
@@ -524,12 +539,12 @@ const pages = {
 
             <div class="promo-carousel">
                 ${featuredAds.map((ad, i) => `
-                    <div class="carousel-slide ${i === 0 ? 'active' : ''}">
+                    <div class="carousel-slide ${i === 0 ? 'active' : ''}" style="${ad.imageUrl ? `background-image: linear-gradient(135deg, rgba(255, 106, 0, 0.8), rgba(219, 75, 0, 0.9)), url('${ad.imageUrl}'); background-size: cover; background-position: center;` : ''}">
                         <div class="carousel-content">
                             <h2>${ad.title || 'Special Promotion'}</h2>
                             <p>${ad.short || ad.link || 'Quality components and electronics'}</p>
                         </div>
-                        <i class="fas ${ad.icon || 'fa-rectangle-ad'} fa-3x" style="margin-left: auto; opacity: 0.3;"></i>
+                        ${ad.imageUrl ? `<img src="${ad.imageUrl}" alt="${ad.title || 'Promo'}" style="width: 50px; height: 50px; object-fit: cover; border-radius: 8px; margin-left: auto; border: 2px solid rgba(255,255,255,0.7); box-shadow: 0 4px 10px rgba(0,0,0,0.15);" onerror="this.style.display='none'">` : `<i class="fas ${ad.icon || 'fa-rectangle-ad'} fa-3x" style="margin-left: auto; opacity: 0.3;"></i>`}
                     </div>
                 `).join('')}
                 ${featuredAds.length > 1 ? `
