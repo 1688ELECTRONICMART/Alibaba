@@ -17,6 +17,7 @@ const auth = firebase.auth();
 const provider = new firebase.auth.GoogleAuthProvider();
 
 let currentUser = null;
+let userData = null;
 let mockProducts = [];
 let featuredAds = [];
 let mockCategories = [
@@ -32,12 +33,27 @@ auth.onAuthStateChanged((user) => {
     currentUser = user;
     if (user) {
         // Sync user data to Firestore
-        db.collection("users").document(user.uid).set({
+        const userRef = db.collection("users").doc(user.uid);
+        userRef.set({
             id: user.uid,
             name: user.displayName,
             email: user.email,
             photo: user.photoURL,
             lastLogin: firebase.firestore.FieldValue.serverTimestamp()
+        }, { merge: true });
+
+        userRef.onSnapshot(doc => {
+            if (doc.exists) {
+                userData = doc.data();
+                const profilePage = document.querySelector('.profile-page');
+                if (profilePage) {
+                    const businessSection = document.getElementById('business-info-section');
+                    if (businessSection) {
+                        businessSection.innerHTML = renderBusinessInfoContent();
+                    }
+                }
+            }
+        });
         }, { merge: true });
 
         // Listen for user's specific chats
@@ -300,12 +316,22 @@ function renderAddressForm() {
     `;
 }
 
+function cloudinaryOptimize(url, width = null) {
+    if (!url || typeof url !== 'string' || !url.includes('res.cloudinary.com')) return url;
+    const parts = url.split('/upload/');
+    if (parts.length !== 2) return url;
+    let transformations = 'f_auto,q_auto';
+    if (width) transformations += `,w_${width},c_limit`;
+    return `${parts[0]}/upload/${transformations}/${parts[1]}`;
+}
+
 function renderThumbImage(imgSrcOrIcon, className = '') {
     if (!imgSrcOrIcon) {
         return `<i class="fas fa-image ${className}"></i>`;
     }
-    const src = String(imgSrcOrIcon).trim();
-    if (src.startsWith('http://') || src.startsWith('https://') || src.startsWith('data:') || src.includes('/')) {
+    const rawSrc = String(imgSrcOrIcon).trim();
+    if (rawSrc.startsWith('http://') || rawSrc.startsWith('https://') || rawSrc.startsWith('data:') || rawSrc.includes('/')) {
+        const src = cloudinaryOptimize(rawSrc, 300);
         return `<img src="${src}" class="${className}" alt="Product" loading="lazy" onerror="this.onerror=null;this.parentElement.innerHTML='<i class=\\\'fas fa-image ${className}\\\'></i>';">`;
     }
     const iconClass = src.startsWith('fa-') ? src : `fa-${src}`;
@@ -316,7 +342,8 @@ window.switchProductDetailImage = function(src, el) {
     const mainContainer = document.getElementById('product-gallery-main');
     if (!mainContainer) return;
     if (src.startsWith('http') || src.startsWith('data:')) {
-        mainContainer.innerHTML = `<img id="product-main-img" src="${src}" alt="Product" style="width: 100%; height: 100%; object-fit: contain;">`;
+        const optimizedSrc = cloudinaryOptimize(src, 800);
+        mainContainer.innerHTML = `<img id="product-main-img" src="${optimizedSrc}" alt="Product" style="width: 100%; height: 100%; object-fit: contain;">`;
     } else {
         mainContainer.innerHTML = `<i id="product-main-img" class="fas ${src.startsWith('fa-') ? src : 'fa-image'} fa-4x" style="color: var(--primary-color);"></i>`;
     }
@@ -349,6 +376,11 @@ window.switchAdvertDetailImage = function(src, el) {
 };
 
 function addToCart(itemId, type) {
+    if (!currentUser) {
+        alert("Please sign in to add items to your cart.");
+        navigate('profile');
+        return false;
+    }
     const strId = String(itemId);
     let item;
     if (type === 'ad') {
@@ -363,9 +395,12 @@ function addToCart(itemId, type) {
         saveData();
         updateCartBadge();
         showNotificationToast("Cart Updated", `${item.title || item.name} added to cart!`);
+        return true;
     } else if (item) {
         showNotificationToast("Notice", 'Item is already in your cart.');
+        return true;
     }
+    return false;
 }
 
 function toggleCartItem(itemId) {
@@ -409,28 +444,40 @@ function sendRealMessage(chatId) {
     });
 }
 
-function startChatWithSupplier(productName) {
+function startChatWithSupplier(itemName, type = 'product') {
     if (!currentUser) return navigate('profile');
 
     const chatId = `chat_${currentUser.uid}`;
     const chatRef = rtdb.ref(`chats/${chatId}`);
+    const inquiryPrefix = type === 'ad' ? 'Advert Inquiry' : 'Product Inquiry';
 
     chatRef.once('value').then(snapshot => {
+        const newMessage = {
+            sender: currentUser.displayName,
+            text: `Hello, I'm interested in this ${type === 'ad' ? 'advert' : 'product'}: ${itemName}.`,
+            time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            fromMe: true
+        };
+
         if (!snapshot.exists()) {
             chatRef.set({
                 id: chatId,
                 userName: currentUser.displayName,
                 userAvatar: 'fa-user',
-                lastMessage: `Inquiry about ${productName}`,
+                lastMessage: `${inquiryPrefix}: ${itemName}`,
                 lastTime: 'Just now',
-                messages: [{
-                    sender: currentUser.displayName,
-                    text: `Hello, I'm interested in ${productName}.`,
-                    time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-                    fromMe: true
-                }],
+                messages: [newMessage],
                 adminUnreadCount: 1,
                 userUnreadCount: 0
+            });
+        } else {
+            const chatData = snapshot.val();
+            const updatedMessages = [...(chatData.messages || []), newMessage];
+            chatRef.update({
+                messages: updatedMessages,
+                lastMessage: `${inquiryPrefix}: ${itemName}`,
+                lastTime: 'Just now',
+                adminUnreadCount: (chatData.adminUnreadCount || 0) + 1
             });
         }
         navigate('chat', chatId);
@@ -516,7 +563,52 @@ function checkout() {
     }, 1500);
 }
 
+function renderBusinessInfoContent() {
+    if (!userData) return '<p>Loading business info...</p>';
+    return `
+        <div class="business-info-fields">
+            <div class="form-group">
+                <label>Company Name</label>
+                <input type="text" id="biz-company" value="${userData.companyName || ''}" placeholder="e.g. Acme Electronics Ltd">
+            </div>
+            <div class="form-group">
+                <label>Business Type</label>
+                <select id="biz-type">
+                    <option value="" ${!userData.businessType ? 'selected' : ''}>Select Type</option>
+                    <option value="Manufacturer" ${userData.businessType === 'Manufacturer' ? 'selected' : ''}>Manufacturer</option>
+                    <option value="Wholesaler" ${userData.businessType === 'Wholesaler' ? 'selected' : ''}>Wholesaler</option>
+                    <option value="Retailer" ${userData.businessType === 'Retailer' ? 'selected' : ''}>Retailer</option>
+                    <option value="Agent" ${userData.businessType === 'Agent' ? 'selected' : ''}>Agent</option>
+                </select>
+            </div>
+            <button class="mini-btn highlight" onclick="saveBusinessInfo()" style="width: 100%; margin-top: 10px;">Save Business Info</button>
+        </div>
+    `;
+}
+
+function saveBusinessInfo() {
+    if (!currentUser) return;
+    const companyName = document.getElementById('biz-company').value.trim();
+    const businessType = document.getElementById('biz-type').value;
+
+    db.collection("users").doc(currentUser.uid).update({
+        companyName: companyName,
+        businessType: businessType
+    }).then(() => {
+        showNotificationToast("Success", "Business profile updated!");
+    }).catch(err => {
+        alert("Error updating profile: " + err.message);
+    });
+}
+
 function logout() {
+    if (confirm('Are you sure you want to log out? This will reset all your sourcing data.')) {
+        auth.signOut().then(() => {
+            localStorage.clear();
+            location.reload(); // Hard reset
+        });
+    }
+}
     if (confirm('Are you sure you want to log out? This will reset all your sourcing data.')) {
         auth.signOut().then(() => {
             localStorage.clear();
@@ -591,15 +683,18 @@ const pages = {
             </div>
 
             <div class="promo-carousel">
-                ${featuredAds.map((ad, i) => `
-                    <div class="carousel-slide ${i === 0 ? 'active' : ''}" data-ad-id="${ad.id}" style="${ad.imageUrl ? `background-image: linear-gradient(135deg, rgba(255, 106, 0, 0.8), rgba(219, 75, 0, 0.9)), url('${ad.imageUrl}'); background-size: cover; background-position: center; cursor: pointer;` : 'cursor: pointer;'}">
+                ${featuredAds.map((ad, i) => {
+                    const bgUrl = cloudinaryOptimize(ad.imageUrl, 1000);
+                    const thumbUrl = cloudinaryOptimize(ad.imageUrl, 100);
+                    return `
+                    <div class="carousel-slide ${i === 0 ? 'active' : ''}" data-ad-id="${ad.id}" style="${ad.imageUrl ? `background-image: linear-gradient(135deg, rgba(255, 106, 0, 0.8), rgba(219, 75, 0, 0.9)), url('${bgUrl}'); background-size: cover; background-position: center; cursor: pointer;` : 'cursor: pointer;'}">
                         <div class="carousel-content">
                             <h2>${ad.title || 'Special Promotion'}</h2>
                             <p>${ad.short || ad.link || 'Quality components and electronics'}</p>
                         </div>
-                        ${ad.imageUrl ? `<img src="${ad.imageUrl}" alt="${ad.title || 'Promo'}" style="width: 50px; height: 50px; object-fit: cover; border-radius: 8px; margin-left: auto; border: 2px solid rgba(255,255,255,0.7); box-shadow: 0 4px 10px rgba(0,0,0,0.15);" onerror="this.style.display='none'">` : `<i class="fas ${ad.icon || 'fa-rectangle-ad'} fa-3x" style="margin-left: auto; opacity: 0.3;"></i>`}
+                        ${ad.imageUrl ? `<img src="${thumbUrl}" alt="${ad.title || 'Promo'}" style="width: 50px; height: 50px; object-fit: cover; border-radius: 8px; margin-left: auto; border: 2px solid rgba(255,255,255,0.7); box-shadow: 0 4px 10px rgba(0,0,0,0.15);" onerror="this.style.display='none'">` : `<i class="fas ${ad.icon || 'fa-rectangle-ad'} fa-3x" style="margin-left: auto; opacity: 0.3;"></i>`}
                     </div>
-                `).join('')}
+                `}).join('')}
                 ${featuredAds.length > 1 ? `
                     <div class="carousel-indicators">
                         ${featuredAds.map((_, i) => `<span class="indicator-dot ${i === 0 ? 'active' : ''}"></span>`).join('')}
@@ -806,6 +901,11 @@ const pages = {
             </header>
 
             <section class="profile-card-group">
+                <div class="section-title" style="margin: 15px 16px 5px;">Business Profile</div>
+                <div id="business-info-section" style="padding: 16px; background: white; margin: 0 16px 16px; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.05);">
+                    ${renderBusinessInfoContent()}
+                </div>
+
                 <div class="service-list">
                     <div class="service-item" data-service="favorites">
                         <div class="service-item-left">
@@ -1219,9 +1319,9 @@ function renderAdvertDetail(adId) {
                 <div class="detail-actions">
                     ${ad.link && ad.link.startsWith('http') ? 
                         `<button class="primary-btn" type="button" onclick="window.open('${ad.link}', '_blank')">${cta}</button>` : 
-                        `<button class="primary-btn buy-now-btn" data-ad-id="${ad.id}" data-item-type="ad" type="button">${cta}</button>`
+                        `<button class="primary-btn buy-now-btn" data-ad-id="${ad.id}" data-item-type="ad" type="button">Start Inquiry</button>`
                     }
-                    <button class="secondary-btn add-to-cart-ad" data-ad-id="${ad.id}" type="button">Add to Cart</button>
+                    <button class="secondary-btn add-to-cart-ad" data-ad-id="${ad.id}" type="button">Add to RFQ</button>
                 </div>
             </div>
         </section>
@@ -1291,6 +1391,8 @@ function renderProductDetail(productId) {
                 <h1>${name}</h1>
                 <p class="detail-company">${company}</p>
                 <div class="detail-price">¥${price}</div>
+                ${product.wholesalePrice ? `<div class="detail-wholesale-price" style="color: #666; font-size: 14px; margin-top: -8px; margin-bottom: 12px;">Wholesale: ¥${Number(product.wholesalePrice).toFixed(2)}</div>` : ''}
+                ${product.moq ? `<div class="detail-moq" style="background: #f0f0f0; display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 12px; margin-bottom: 12px;">MOQ: ${product.moq} units</div>` : ''}
                 <p class="detail-description">${description}</p>
 
                 <div class="detail-list">
@@ -1298,8 +1400,8 @@ function renderProductDetail(productId) {
                 </div>
 
                 <div class="detail-actions">
-                    <button class="primary-btn buy-now-btn" data-product-id="${product.id}" data-item-type="prod" type="button">Buy Now</button>
-                    <button class="secondary-btn add-to-cart-prod" data-product-id="${product.id}" type="button">Add to Cart</button>
+                    <button class="primary-btn buy-now-btn" data-product-id="${product.id}" data-item-type="prod" type="button">Start Inquiry / Buy</button>
+                    <button class="secondary-btn add-to-cart-prod" data-product-id="${product.id}" type="button">Add to RFQ</button>
                 </div>
             </div>
         </section>
@@ -1447,8 +1549,18 @@ document.getElementById('app-content').addEventListener('click', (event) => {
     if (buyNowBtn) {
         const id = buyNowBtn.dataset.productId || buyNowBtn.dataset.adId;
         const type = buyNowBtn.dataset.itemType || (buyNowBtn.dataset.productId ? 'prod' : 'ad');
-        addToCart(id, type);
-        navigate('cart');
+
+        if (type === 'ad') {
+            const ad = featuredAds.find(a => String(a.id) === String(id));
+            if (ad) {
+                startChatWithSupplier(ad.title || 'Special Offer', 'ad');
+                return;
+            }
+        }
+
+        if (addToCart(id, type)) {
+            navigate('cart');
+        }
         return;
     }
 
