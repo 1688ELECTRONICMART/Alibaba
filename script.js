@@ -16,17 +16,28 @@ const rtdb = firebase.database();
 const auth = firebase.auth();
 const provider = new firebase.auth.GoogleAuthProvider();
 
+// Persistent State Helper
+const storage = {
+    get: (key, fallback) => {
+        try { return JSON.parse(localStorage.getItem(key)) || fallback; }
+        catch { return fallback; }
+    },
+    set: (key, value) => {
+        try { localStorage.setItem(key, JSON.stringify(value)); } catch {}
+    }
+};
+
 let currentUser = null;
 let userData = null;
-let mockProducts = [];
-let featuredAds = [];
-let mockCategories = [
+let mockProducts = storage.get('cache_products', []);
+let featuredAds = storage.get('cache_adverts', []);
+let mockCategories = storage.get('cache_categories', [
     { id: 'c1', name: 'Phone', icon: 'fa-mobile-alt' },
     { id: 'c2', name: 'Electronics', icon: 'fa-bolt' },
     { id: 'c3', name: 'Instrument', icon: 'fa-microchip' },
     { id: 'c4', name: 'Vehicle', icon: 'fa-car' },
     { id: 'c5', name: 'Laptops', icon: 'fa-laptop' }
-];
+]);
 let userChats = [];
 
 auth.onAuthStateChanged((user) => {
@@ -54,7 +65,6 @@ auth.onAuthStateChanged((user) => {
                 }
             }
         });
-        }, { merge: true });
 
         // Listen for user's specific chats
         rtdb.ref("chats").on("value", (snapshot) => {
@@ -83,12 +93,14 @@ function signInWithGoogle() {
 // Real-time Listeners
 db.collection("products").onSnapshot((snapshot) => {
     mockProducts = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    saveData();
     renderHomePageIfActive();
 });
 
 db.collection("categories").onSnapshot((snapshot) => {
     if (!snapshot.empty) {
         mockCategories = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        saveData();
         renderHomePageIfActive();
     }
 });
@@ -113,6 +125,7 @@ db.collection("adverts").onSnapshot((snapshot) => {
         const firestoreAds = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
         if (firestoreAds.length > 0) {
             featuredAds = firestoreAds;
+            saveData();
             renderHomePageIfActive();
         }
     }
@@ -124,6 +137,7 @@ rtdb.ref("adverts").on("value", (snapshot) => {
     const data = snapshot.val();
     if (data && Object.keys(data).length > 0) {
         featuredAds = Object.values(data);
+        saveData();
         renderHomePageIfActive();
     } else if (featuredAds.length === 0) {
         featuredAds = [
@@ -207,15 +221,9 @@ const mockMessages = [];
 const followedShops = [];
 
 // Persistent State Helper
-const storage = {
-    get: (key, fallback) => {
-        try { return JSON.parse(localStorage.getItem(key)) || fallback; }
-        catch { return fallback; }
-    },
-    set: (key, value) => {
-        try { localStorage.setItem(key, JSON.stringify(value)); } catch {}
-    }
-};
+const mockMessages = [];
+
+const followedShops = [];
 
 let cart = storage.get('cart', []);
 let selectedCartItems = new Set(storage.get('selectedCartItems', []));
@@ -232,6 +240,9 @@ function saveData() {
     storage.set('footprints', footprints);
     storage.set('recentSearches', recentSearches);
     storage.set('addresses', addresses);
+    storage.set('cache_products', mockProducts);
+    storage.set('cache_adverts', featuredAds);
+    storage.set('cache_categories', mockCategories);
 }
 
 function showNotificationToast(title, body) {
@@ -343,7 +354,7 @@ function renderThumbImage(imgSrcOrIcon, className = '') {
         const src = cloudinaryOptimize(rawSrc, 300);
         return `<img src="${src}" class="${className}" alt="Product" loading="lazy" onerror="this.onerror=null;this.parentElement.innerHTML='<i class=\\\'fas fa-image ${className}\\\'></i>';">`;
     }
-    const iconClass = src.startsWith('fa-') ? src : `fa-${src}`;
+    const iconClass = rawSrc.startsWith('fa-') ? rawSrc : `fa-${rawSrc}`;
     return `<i class="fas ${iconClass} ${className}"></i>`;
 }
 
